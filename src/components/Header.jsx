@@ -1,6 +1,6 @@
 import React from 'react';
-import zenepPhoto from '../assets/zenepcan.jpg';
-import ametPhoto from '../assets/ametcan.jpg';
+import zenepPhoto from "../assets/zenepcan.jpeg";
+import ametPhoto from "../assets/ametcan.jpeg";
 
 const users = [
   { id: 'zenep', name: 'Zenepcan', avatar: zenepPhoto },
