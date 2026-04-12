@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onChildAdded, push, set } from 'firebase/database';
-import { Trash2, Eraser } from 'lucide-react';
+import { Trash2, Eraser, Undo2 } from 'lucide-react';
 
 export default function SharedCanvas() {
   const canvasRef = useRef(null);
@@ -9,6 +9,11 @@ export default function SharedCanvas() {
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
   const [color, setColor] = useState('#fb7185'); // pink
   const [isEraser, setIsEraser] = useState(false);
+  const [history, setHistory] = useState([]);
+  
+  const currentStrokeIdRef = useRef('');
+  const allSegmentsRef = useRef([]);
+  const undoneStrokesRef = useRef(new Set());
   
   const colors = ['#fb7185', '#38bdf8', '#34d399', '#fbbf24', '#a78bfa', '#475569'];
 
@@ -29,6 +34,19 @@ export default function SharedCanvas() {
     };
   };
 
+  const drawSegment = (ctx, seg) => {
+    if (seg.clear || seg.undo) return;
+    ctx.globalCompositeOperation = seg.isEraser ? 'destination-out' : 'source-over';
+    ctx.lineWidth = seg.isEraser ? seg.width * 5 : seg.width;
+    
+    ctx.beginPath();
+    ctx.moveTo(seg.x0, seg.y0);
+    ctx.lineTo(seg.x1, seg.y1);
+    ctx.strokeStyle = seg.isEraser ? 'rgba(0,0,0,1)' : seg.color;
+    ctx.stroke();
+    ctx.closePath();
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -44,20 +62,29 @@ export default function SharedCanvas() {
     const unsubscribe = onChildAdded(segmentsRef, (snapshot) => {
       const seg = snapshot.val();
       if (!seg) return;
+      
       if (seg.clear) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        allSegmentsRef.current = [];
+        undoneStrokesRef.current = new Set();
         return;
       }
       
-      ctx.globalCompositeOperation = seg.isEraser ? 'destination-out' : 'source-over';
-      ctx.lineWidth = seg.isEraser ? seg.width * 5 : seg.width;
+      if (seg.undo) {
+        undoneStrokesRef.current.add(seg.strokeId);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        allSegmentsRef.current.forEach(s => {
+          if (!undoneStrokesRef.current.has(s.strokeId)) {
+            drawSegment(ctx, s);
+          }
+        });
+        return;
+      }
       
-      ctx.beginPath();
-      ctx.moveTo(seg.x0, seg.y0);
-      ctx.lineTo(seg.x1, seg.y1);
-      ctx.strokeStyle = seg.isEraser ? 'rgba(0,0,0,1)' : seg.color;
-      ctx.stroke();
-      ctx.closePath();
+      allSegmentsRef.current.push(seg);
+      if (!undoneStrokesRef.current.has(seg.strokeId)) {
+        drawSegment(ctx, seg);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -65,6 +92,9 @@ export default function SharedCanvas() {
   const startDraw = (e) => {
     setIsDrawing(true);
     setLastPos(getPos(e));
+    const strokeId = Date.now().toString() + Math.random().toString();
+    currentStrokeIdRef.current = strokeId;
+    setHistory(prev => [...prev, strokeId]);
   };
 
   const draw = (e) => {
@@ -76,6 +106,7 @@ export default function SharedCanvas() {
     
     // push segment to firebase
     push(ref(rtdb, 'canvas/segments'), {
+      strokeId: currentStrokeIdRef.current,
       x0: lastPos.x,
       y0: lastPos.y,
       x1: currentPos.x,
@@ -94,17 +125,39 @@ export default function SharedCanvas() {
 
   const clearCanvas = () => {
     // Sil tuşu için rtdb değerini boşalt ve tüm cihazlardaki canvası temizlemek için bir 'clear' nesnesi yolla
+    setHistory([]);
     set(ref(rtdb, 'canvas/segments'), null);
     push(ref(rtdb, 'canvas/segments'), { clear: true });
+  };
+
+  const handleUndo = () => {
+    if (history.length === 0) return;
+    const lastStrokeId = history[history.length - 1];
+    setHistory(prev => prev.slice(0, -1));
+    push(ref(rtdb, 'canvas/segments'), { undo: true, strokeId: lastStrokeId });
   };
 
   return (
     <div className="bg-white/80 backdrop-blur-sm rounded-[2rem] shadow-sm border border-purple-100/50 p-6 flex flex-col items-center">
       <div className="w-full flex justify-between items-center mb-4">
         <h2 className="font-bold text-slate-700">Ortak Çizim Tahtası 🎨</h2>
-        <button onClick={clearCanvas} className="p-2 bg-purple-50 text-purple-500 rounded-full hover:bg-purple-100 transition-colors shadow-sm">
-          <Trash2 size={18} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={handleUndo} 
+            disabled={history.length === 0} 
+            className="p-2 bg-slate-50 text-slate-500 rounded-full hover:bg-slate-100 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed" 
+            title="Geri Al"
+          >
+            <Undo2 size={18} />
+          </button>
+          <button 
+            onClick={clearCanvas} 
+            className="p-2 bg-purple-50 text-purple-500 rounded-full hover:bg-purple-100 transition-colors shadow-sm"
+            title="Tümünü Temizle"
+          >
+            <Trash2 size={18} />
+          </button>
+        </div>
       </div>
 
       <div className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl overflow-hidden mb-5 touch-none relative shadow-inner">
