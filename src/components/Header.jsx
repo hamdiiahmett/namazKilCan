@@ -1,8 +1,10 @@
 import React from 'react';
+import zenepPhoto from '../assets/zenepcan.jpg';
+import ametPhoto from '../assets/ametcan.jpg';
 
 const users = [
-  { id: 'zenep', name: 'Zenepcan', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Zenepcan&backgroundColor=ffdfbf' },
-  { id: 'amet', name: 'Ametcan', avatar: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Ametcan&backgroundColor=b6e3f4' }
+  { id: 'zenep', name: 'Zenepcan', avatar: zenepPhoto },
+  { id: 'amet', name: 'Ametcan', avatar: ametPhoto }
 ];
 
 export default function Header({ currentUser, setCurrentUser }) {
