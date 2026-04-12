@@ -1,13 +1,14 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onChildAdded, push, set } from 'firebase/database';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Eraser } from 'lucide-react';
 
 export default function SharedCanvas() {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
   const [color, setColor] = useState('#fb7185'); // pink
+  const [isEraser, setIsEraser] = useState(false);
   
   const colors = ['#fb7185', '#38bdf8', '#34d399', '#fbbf24', '#a78bfa', '#475569'];
 
@@ -47,11 +48,14 @@ export default function SharedCanvas() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         return;
       }
+      
+      ctx.globalCompositeOperation = seg.isEraser ? 'destination-out' : 'source-over';
+      ctx.lineWidth = seg.isEraser ? seg.width * 5 : seg.width;
+      
       ctx.beginPath();
       ctx.moveTo(seg.x0, seg.y0);
       ctx.lineTo(seg.x1, seg.y1);
-      ctx.strokeStyle = seg.color;
-      ctx.lineWidth = seg.width;
+      ctx.strokeStyle = seg.isEraser ? 'rgba(0,0,0,1)' : seg.color;
       ctx.stroke();
       ctx.closePath();
     });
@@ -77,7 +81,8 @@ export default function SharedCanvas() {
       x1: currentPos.x,
       y1: currentPos.y,
       color: color,
-      width: 4
+      width: 4,
+      isEraser: isEraser
     });
     
     setLastPos(currentPos);
@@ -116,15 +121,25 @@ export default function SharedCanvas() {
         />
       </div>
 
-      <div className="flex justify-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm">
+      <div className="flex justify-center gap-3 bg-white px-4 py-2 rounded-full shadow-sm items-center">
         {colors.map(c => (
           <button
             key={c}
-            onClick={() => setColor(c)}
-            className={`w-8 h-8 rounded-full border-2 transition-transform shadow-sm ${color === c ? 'scale-125 border-white shadow-md' : 'border-transparent'}`}
+            onClick={() => { setColor(c); setIsEraser(false); }}
+            className={`w-8 h-8 rounded-full border-2 transition-transform shadow-sm flex-shrink-0 ${!isEraser && color === c ? 'scale-125 border-white shadow-md' : 'border-transparent'}`}
             style={{ backgroundColor: c }}
           />
         ))}
+        
+        <div className="w-[2px] h-6 bg-slate-200 mx-1 rounded-full"></div>
+        
+        <button
+          onClick={() => setIsEraser(true)}
+          className={`flex items-center justify-center w-8 h-8 rounded-full transition-all shadow-sm flex-shrink-0 ${isEraser ? 'scale-125 bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+          title="Silgi"
+        >
+          <Eraser size={16} />
+        </button>
       </div>
     </div>
   );
