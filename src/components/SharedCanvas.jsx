@@ -244,6 +244,18 @@ export default function SharedCanvas({ currentUser }) {
               />
             ))}
             
+            <div className={`relative w-8 h-8 rounded-full border-2 transition-transform shadow-sm flex-shrink-0 overflow-hidden cursor-pointer ${!isEraser && !colors.includes(color) ? 'scale-125 border-slate-300 shadow-md' : 'border-transparent'}`}
+                 style={{ background: 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)' }}
+                 title="Özel Renk Seç"
+            >
+              <input 
+                type="color" 
+                value={colors.includes(color) ? '#000000' : color} 
+                onChange={(e) => { setColor(e.target.value); setIsEraser(false); }}
+                className="absolute inset-0 w-[150%] h-[150%] top-[-25%] left-[-25%] opacity-0 cursor-pointer"
+              />
+            </div>
+            
             <div className={`w-[2px] h-6 mx-1 rounded-full hidden sm:block ${isFullscreen ? 'bg-slate-700' : 'bg-slate-200'}`}></div>
             
             <button
