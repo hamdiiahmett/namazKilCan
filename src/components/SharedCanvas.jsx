@@ -11,6 +11,14 @@ export default function SharedCanvas({ currentUser }) {
   const [isEraser, setIsEraser] = useState(false);
   const [history, setHistory] = useState([]);
   
+  const colorRef = useRef(color);
+  const isEraserRef = useRef(isEraser);
+  const lastPosRef = useRef(lastPos);
+
+  useEffect(() => { colorRef.current = color; }, [color]);
+  useEffect(() => { isEraserRef.current = isEraser; }, [isEraser]);
+  useEffect(() => { lastPosRef.current = lastPos; }, [lastPos]);
+  
   const currentStrokeIdRef = useRef('');
   const allSegmentsRef = useRef([]);
   const undoneStrokesRef = useRef(new Set());
@@ -91,37 +99,60 @@ export default function SharedCanvas({ currentUser }) {
 
   const startDraw = (e) => {
     setIsDrawing(true);
-    setLastPos(getPos(e));
+    const pos = getPos(e);
+    setLastPos(pos);
+    lastPosRef.current = pos;
     const strokeId = Date.now().toString() + Math.random().toString();
     currentStrokeIdRef.current = strokeId;
     setHistory(prev => [...prev, strokeId]);
   };
 
-  const draw = (e) => {
+  useEffect(() => {
     if (!isDrawing) return;
-    // For touch devices, prevent default scrolling behavior while drawing manually
-    if (e.cancelable) e.preventDefault();
-    
-    const currentPos = getPos(e);
-    
-    // push segment to firebase
-    push(ref(rtdb, 'canvas/segments'), {
-      strokeId: currentStrokeIdRef.current,
-      x0: lastPos.x,
-      y0: lastPos.y,
-      x1: currentPos.x,
-      y1: currentPos.y,
-      color: color,
-      width: 4,
-      isEraser: isEraser
-    });
-    
-    setLastPos(currentPos);
-  };
 
-  const stopDraw = () => {
-    setIsDrawing(false);
-  };
+    const handleMove = (e) => {
+      // Preventing default if possible to avoid scrolling globally while dragging,
+      // especially on mobile devices.
+      if (e.cancelable && e.type === 'touchmove') {
+        e.preventDefault();
+      }
+      
+      const currentPos = getPos(e);
+      const lp = lastPosRef.current;
+      
+      push(ref(rtdb, 'canvas/segments'), {
+        strokeId: currentStrokeIdRef.current,
+        x0: lp.x,
+        y0: lp.y,
+        x1: currentPos.x,
+        y1: currentPos.y,
+        color: colorRef.current,
+        width: 4,
+        isEraser: isEraserRef.current
+      });
+      
+      setLastPos(currentPos);
+      lastPosRef.current = currentPos;
+    };
+
+    const handleEnd = () => {
+      setIsDrawing(false);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+    window.addEventListener('touchcancel', handleEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleEnd);
+      window.removeEventListener('touchcancel', handleEnd);
+    };
+  }, [isDrawing]);
 
   const clearCanvas = () => {
     // Sil tuşu için rtdb değerini boşalt ve tüm cihazlardaki canvası temizlemek için bir 'clear' nesnesi yolla
@@ -188,12 +219,7 @@ export default function SharedCanvas({ currentUser }) {
         <canvas
           ref={canvasRef}
           onMouseDown={startDraw}
-          onMouseMove={draw}
-          onMouseUp={stopDraw}
-          onMouseOut={stopDraw}
           onTouchStart={startDraw}
-          onTouchMove={draw}
-          onTouchEnd={stopDraw}
           className="w-full aspect-[5/3] cursor-crosshair bg-white block"
         />
       </div>
