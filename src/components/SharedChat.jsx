@@ -71,13 +71,13 @@ export default function SharedChat({ currentUser }) {
     setEditingId(null);
   };
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-[2rem] shadow-sm border border-sky-100/50 flex flex-col overflow-hidden h-[450px]">
+    <div className="bg-white/80 backdrop-blur-sm rounded-3xl sm:rounded-[2rem] shadow-sm border border-sky-100/50 flex flex-col overflow-hidden h-[60vh] sm:h-[500px] w-full">
       <div className="bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center">
         <h2 className="font-bold text-slate-700">Ortak Not Defteri 💭</h2>
         <span className="text-xs bg-white/60 px-2 py-1 rounded-full text-slate-500 font-medium">Uçtan Uca Şifresiz 🙈</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 bg-slate-50/50 flex flex-col relative">
         {messages.length === 0 && (
           <div className="h-full flex items-center justify-center text-slate-300 font-medium italic">
             Henüz kimse bir şey yazmamış...
@@ -93,7 +93,7 @@ export default function SharedChat({ currentUser }) {
             <div key={msg.id || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               {editingId === msg.id ? (
                 // Editing UI
-                <div className="w-full max-w-[85%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
+                <div className="w-full max-w-[95%] sm:max-w-[85%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
                    <input 
                      autoFocus
                      value={editText} 
@@ -111,19 +111,19 @@ export default function SharedChat({ currentUser }) {
                 </div>
               ) : (
                 // Normal Bubble
-                <div className="flex flex-col items-end">
+                <div className="flex flex-col items-end w-full">
                   <div 
                     onClick={() => {
                       if (isMe && !msg.isDeleted) {
                         setActiveMenuId(activeMenuId === msg.id ? null : msg.id);
                       }
                     }}
-                    className={`max-w-[240px] md:max-w-xs px-4 py-2.5 rounded-2xl shadow-sm relative text-[15px] leading-relaxed transition-colors ${isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : ''}
+                    className={`max-w-[85%] sm:max-w-[75%] px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-sm relative text-[14px] sm:text-[15px] leading-relaxed transition-colors ${isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : ''}
                       ${isMe 
                         ? msg.isDeleted 
                           ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none' 
                           : 'bg-sky-400 text-white rounded-tr-none' 
-                        : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'}`}
+                        : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none self-start'} ${!isMe ? 'mr-auto' : 'ml-auto'}`}
                   >
                     {msg.type === 'image' && !msg.isDeleted ? (
                       <div className="mt-1 mb-1 relative">
@@ -180,18 +180,18 @@ export default function SharedChat({ currentUser }) {
         <div ref={messagesEndRef} />
       </div>
 
-      <form onSubmit={handleSend} className="p-3 bg-white border-t border-slate-100 flex gap-2">
+      <form onSubmit={handleSend} className="p-2 sm:p-3 bg-white border-t border-slate-100 flex gap-2 sticky bottom-0 z-20">
         <input
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Tatlı bir şeyler yaz..."
-          className="flex-1 bg-slate-50 border-none rounded-full px-4 py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all font-medium"
+          className="flex-1 bg-slate-50 border-none rounded-full px-4 py-2.5 sm:py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-sm sm:text-base font-medium min-w-0"
         />
         <button 
           type="submit" 
           disabled={!text.trim()}
-          className="bg-sky-400 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white w-12 h-12 rounded-full flex items-center justify-center transition-colors shadow-sm"
+          className="bg-sky-400 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 rounded-full flex items-center justify-center transition-colors shadow-sm"
         >
           <Send size={18} className="translate-x-0.5" />
         </button>

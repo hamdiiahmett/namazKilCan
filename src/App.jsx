@@ -16,7 +16,7 @@ function App() {
   return (
     <div className="min-h-screen bg-fuchsia-50 text-slate-800 pb-10 sm:pb-20 font-sans selection:bg-pink-300">
       <Header currentUser={currentUser} setCurrentUser={setCurrentUser} />
-      <main className="max-w-xl mx-auto px-4 mt-6 space-y-6">
+      <main className="max-w-xl mx-auto px-2 sm:px-4 mt-4 sm:mt-6 space-y-4 sm:space-y-6">
         <PrayerTracker />
         <SharedChat currentUser={currentUser} />
         <SharedCanvas currentUser={currentUser} />
