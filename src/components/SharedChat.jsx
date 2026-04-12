@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { rtdb } from '../firebase';
-import { ref, onValue, push, serverTimestamp } from 'firebase/database';
+import { ref, onValue, push, serverTimestamp, update } from 'firebase/database';
 import { Send } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -8,12 +8,19 @@ export default function SharedChat({ currentUser }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const messagesEndRef = useRef(null);
+  
+  const [activeMenuId, setActiveMenuId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState('');
 
   useEffect(() => {
     const chatRef = ref(rtdb, 'chat/messages');
     const unsubscribe = onValue(chatRef, (snapshot) => {
       if (snapshot.exists()) {
-        const msgs = Object.values(snapshot.val());
+        const msgs = Object.entries(snapshot.val()).map(([key, val]) => ({
+          id: key,
+          ...val
+        }));
         // Sıralama
         msgs.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         setMessages(msgs);
@@ -41,6 +48,28 @@ export default function SharedChat({ currentUser }) {
     setText('');
   };
 
+  const handleDelete = (id) => {
+    update(ref(rtdb, `chat/messages/${id}`), {
+      isDeleted: true,
+      text: '🚫 Bu mesaj silindi'
+    });
+    setActiveMenuId(null);
+  };
+
+  const handleEditClick = (msg) => {
+    setEditingId(msg.id);
+    setEditText(msg.text);
+    setActiveMenuId(null);
+  };
+
+  const handleSaveEdit = (id) => {
+    if (!editText.trim()) return;
+    update(ref(rtdb, `chat/messages/${id}`), {
+      text: editText.trim(),
+      isEdited: true
+    });
+    setEditingId(null);
+  };
   return (
     <div className="bg-white/80 backdrop-blur-sm rounded-[2rem] shadow-sm border border-sky-100/50 flex flex-col overflow-hidden h-[450px]">
       <div className="bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center">
@@ -61,18 +90,69 @@ export default function SharedChat({ currentUser }) {
           const timeString = msg.timestamp ? format(new Date(msg.timestamp), 'HH:mm') : '';
 
           return (
-            <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div 
-                className={`max-w-[75%] px-4 py-2.5 rounded-2xl shadow-sm relative text-[15px] leading-relaxed
-                  ${isMe 
-                    ? 'bg-sky-400 text-white rounded-tr-none' 
-                    : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'}`}
-              >
-                <div className="break-words">{msg.text}</div>
-                <div className={`text-[10px] mt-1 text-right ${isMe ? 'text-sky-100' : 'text-slate-400'}`}>
-                  {timeString}
+            <div key={msg.id || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+              {editingId === msg.id ? (
+                // Editing UI
+                <div className="w-full max-w-[85%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
+                   <input 
+                     autoFocus
+                     value={editText} 
+                     onChange={e => setEditText(e.target.value)}
+                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-sky-300 transition-colors"
+                     onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveEdit(msg.id);
+                        if (e.key === 'Escape') setEditingId(null);
+                     }}
+                   />
+                   <div className="flex justify-end gap-2 text-xs font-medium">
+                     <button onClick={() => setEditingId(null)} className="px-3 py-1.5 text-slate-500 bg-slate-100 rounded-md hover:bg-slate-200 transition-colors">İptal</button>
+                     <button onClick={() => handleSaveEdit(msg.id)} className="px-3 py-1.5 text-white bg-sky-400 rounded-md hover:bg-sky-500 transition-colors shadow-sm">Kaydet</button>
+                   </div>
                 </div>
-              </div>
+              ) : (
+                // Normal Bubble
+                <div className="flex flex-col items-end">
+                  <div 
+                    onClick={() => {
+                      if (isMe && !msg.isDeleted) {
+                        setActiveMenuId(activeMenuId === msg.id ? null : msg.id);
+                      }
+                    }}
+                    className={`max-w-[240px] md:max-w-xs px-4 py-2.5 rounded-2xl shadow-sm relative text-[15px] leading-relaxed transition-colors ${isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : ''}
+                      ${isMe 
+                        ? msg.isDeleted 
+                          ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none' 
+                          : 'bg-sky-400 text-white rounded-tr-none' 
+                        : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'}`}
+                  >
+                    <div className="break-words">
+                      {msg.text}
+                    </div>
+                    <div className={`flex justify-end items-center gap-1 text-[10px] mt-1 ${isMe ? (msg.isDeleted ? 'text-slate-400' : 'text-sky-100') : 'text-slate-400'}`}>
+                      {msg.isEdited && !msg.isDeleted && <span className="opacity-80 font-medium">(düzenlendi)</span>}
+                      <span>{timeString}</span>
+                    </div>
+                  </div>
+                  
+                  {/* Menu Options */}
+                  {activeMenuId === msg.id && (
+                    <div className="mt-1.5 flex gap-2 justify-end mr-1 animate-in fade-in duration-200">
+                      <button 
+                        onClick={() => handleEditClick(msg)}
+                        className="text-xs font-medium bg-white text-slate-600 px-3 py-1.5 rounded-lg shadow-sm border border-slate-100 hover:bg-slate-50 transition-colors"
+                      >
+                        Düzenle
+                      </button>
+                      <button 
+                        onClick={() => handleDelete(msg.id)}
+                        className="text-xs font-medium bg-white text-red-500 px-3 py-1.5 rounded-lg shadow-sm border border-red-100 hover:bg-red-50 transition-colors"
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
