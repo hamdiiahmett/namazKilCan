@@ -9,7 +9,7 @@ const users = [
 
 export default function Header({ currentUser, setCurrentUser }) {
   return (
-    <header className="pt-8 pb-6 px-4 bg-white/70 backdrop-blur-md sticky top-0 z-40 shadow-sm shadow-pink-100/50 border-b border-pink-100 rounded-b-[2.5rem]">
+    <header className="pt-8 pb-6 px-4 bg-white/70 backdrop-blur-md sticky top-0 z-50 shadow-sm shadow-pink-100/50 border-b border-pink-100 rounded-b-[2.5rem]">
       <div className="max-w-xl mx-auto flex flex-col items-center">
         <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-sky-400 mb-6 drop-shadow-sm">
           Namaz Kıl CAN 🌸
