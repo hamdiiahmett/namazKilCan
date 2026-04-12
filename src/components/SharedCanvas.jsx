@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onChildAdded, push, set, serverTimestamp } from 'firebase/database';
-import { Trash2, Eraser, Undo2, Send } from 'lucide-react';
+import { Trash2, Eraser, Undo2, Send, Maximize, X } from 'lucide-react';
 
 export default function SharedCanvas({ currentUser }) {
   const canvasRef = useRef(null);
@@ -10,6 +10,7 @@ export default function SharedCanvas({ currentUser }) {
   const [color, setColor] = useState('#fb7185'); // pink
   const [isEraser, setIsEraser] = useState(false);
   const [history, setHistory] = useState([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   const colorRef = useRef(color);
   const isEraserRef = useRef(isEraser);
@@ -193,66 +194,75 @@ export default function SharedCanvas({ currentUser }) {
   };
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-[2rem] shadow-sm border border-purple-100/50 p-6 flex flex-col items-center">
-      <div className="w-full flex justify-between items-center mb-4">
-        <h2 className="font-bold text-slate-700">Ortak Çizim Tahtası 🎨</h2>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={handleUndo} 
-            disabled={history.length === 0} 
-            className="p-2 bg-slate-50 text-slate-500 rounded-full hover:bg-slate-100 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed" 
-            title="Geri Al"
-          >
-            <Undo2 size={18} />
-          </button>
-          <button 
-            onClick={clearCanvas} 
-            className="p-2 bg-purple-50 text-purple-500 rounded-full hover:bg-purple-100 transition-colors shadow-sm"
-            title="Tümünü Temizle"
-          >
-            <Trash2 size={18} />
-          </button>
+    <div className={`${isFullscreen ? 'fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-md p-4 sm:p-8 overflow-y-auto' : 'bg-white/80 backdrop-blur-sm rounded-[2rem] shadow-sm border border-purple-100/50 p-6'} flex flex-col items-center transition-all duration-300`}>
+      <div className={`w-full ${isFullscreen ? 'max-w-5xl my-auto' : ''}`}>
+        <div className="w-full flex justify-between items-center mb-4">
+          <h2 className={`font-bold ${isFullscreen ? 'text-white' : 'text-slate-700'}`}>Ortak Çizim Tahtası 🎨</h2>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setIsFullscreen(!isFullscreen)} 
+              className={`p-2 rounded-full transition-colors shadow-sm ${isFullscreen ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+              title={isFullscreen ? "Tam Ekrandan Çık" : "Tam Ekran"}
+            >
+              {isFullscreen ? <X size={18} /> : <Maximize size={18} />}
+            </button>
+            <button 
+              onClick={handleUndo} 
+              disabled={history.length === 0} 
+              className={`p-2 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${isFullscreen ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}
+              title="Geri Al"
+            >
+              <Undo2 size={18} />
+            </button>
+            <button 
+              onClick={clearCanvas} 
+              className={`p-2 rounded-full transition-colors shadow-sm ${isFullscreen ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30' : 'bg-purple-50 text-purple-500 hover:bg-purple-100'}`}
+              title="Tümünü Temizle"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl overflow-hidden mb-5 touch-none relative shadow-inner">
-        <canvas
-          ref={canvasRef}
-          onMouseDown={startDraw}
-          onTouchStart={startDraw}
-          className="w-full aspect-[5/3] cursor-crosshair bg-white block"
-        />
-      </div>
+        <div className={`w-full border-2 ${isFullscreen ? 'border-slate-700 bg-slate-800 shadow-2xl' : 'border-dashed border-slate-200 bg-slate-50 shadow-inner'} rounded-2xl overflow-hidden mb-5 touch-none relative`}>
+          <canvas
+            ref={canvasRef}
+            onMouseDown={startDraw}
+            onTouchStart={startDraw}
+            className="w-full aspect-[5/3] cursor-crosshair bg-white block"
+          />
+        </div>
 
-      <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="flex justify-center flex-wrap gap-2 sm:gap-3 bg-white px-4 py-2 rounded-full shadow-sm items-center w-full sm:w-auto">
-          {colors.map(c => (
+        <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className={`flex justify-center flex-wrap gap-2 sm:gap-3 px-4 py-2 rounded-full shadow-sm items-center w-full sm:w-auto ${isFullscreen ? 'bg-slate-800/80' : 'bg-white'}`}>
+            {colors.map(c => (
+              <button
+                key={c}
+                onClick={() => { setColor(c); setIsEraser(false); }}
+                className={`w-8 h-8 rounded-full border-2 transition-transform shadow-sm flex-shrink-0 ${!isEraser && color === c ? 'scale-125 border-slate-300 shadow-md' : 'border-transparent'}`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            
+            <div className={`w-[2px] h-6 mx-1 rounded-full hidden sm:block ${isFullscreen ? 'bg-slate-700' : 'bg-slate-200'}`}></div>
+            
             <button
-              key={c}
-              onClick={() => { setColor(c); setIsEraser(false); }}
-              className={`w-8 h-8 rounded-full border-2 transition-transform shadow-sm flex-shrink-0 ${!isEraser && color === c ? 'scale-125 border-white shadow-md' : 'border-transparent'}`}
-              style={{ backgroundColor: c }}
-            />
-          ))}
+              onClick={() => setIsEraser(true)}
+              className={`flex items-center justify-center w-8 h-8 rounded-full transition-all shadow-sm flex-shrink-0 ${isEraser ? (isFullscreen ? 'bg-white text-slate-900 shadow-md scale-125' : 'bg-slate-800 text-white shadow-md scale-125') : (isFullscreen ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200')}`}
+              title="Silgi"
+            >
+              <Eraser size={16} />
+            </button>
+          </div>
           
-          <div className="w-[2px] h-6 bg-slate-200 mx-1 rounded-full hidden sm:block"></div>
-          
-          <button
-            onClick={() => setIsEraser(true)}
-            className={`flex items-center justify-center w-8 h-8 rounded-full transition-all shadow-sm flex-shrink-0 ${isEraser ? 'scale-125 bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-            title="Silgi"
+          <button 
+            onClick={handleSendToChat}
+            className="flex items-center justify-center gap-2 bg-pink-500 hover:bg-pink-600 text-white px-5 py-2.5 rounded-full shadow-sm transition-all font-medium w-full sm:w-auto"
           >
-            <Eraser size={16} />
+            <span>Sohbete Gönder</span>
+            <Send size={16} className="translate-x-0.5" />
           </button>
         </div>
-        
-        <button 
-          onClick={handleSendToChat}
-          className="flex items-center justify-center gap-2 bg-pink-500 hover:bg-pink-600 text-white px-5 py-2.5 rounded-full shadow-sm transition-all font-medium w-full sm:w-auto"
-        >
-          <span>Sohbete Gönder</span>
-          <Send size={16} className="translate-x-0.5" />
-        </button>
       </div>
     </div>
   );
