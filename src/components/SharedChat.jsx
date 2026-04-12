@@ -125,9 +125,28 @@ export default function SharedChat({ currentUser }) {
                           : 'bg-sky-400 text-white rounded-tr-none' 
                         : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'}`}
                   >
-                    <div className="break-words">
-                      {msg.text}
-                    </div>
+                    {msg.type === 'image' && !msg.isDeleted ? (
+                      <div className="mt-1 mb-1 relative">
+                        <img 
+                          src={msg.imageUrl} 
+                          alt="Çizim" 
+                          className="rounded-xl w-full max-w-[200px] border-2 border-white/20 shadow-sm bg-white" 
+                        />
+                        <a 
+                          href={msg.imageUrl} 
+                          download={`cizim-${msg.timestamp || Date.now()}.png`} 
+                          title="İndir"
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute bottom-1 right-1 bg-black/50 hover:bg-black/70 text-white p-1.5 rounded-lg backdrop-blur-sm transition-colors"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="break-words">
+                        {msg.text}
+                      </div>
+                    )}
                     <div className={`flex justify-end items-center gap-1 text-[10px] mt-1 ${isMe ? (msg.isDeleted ? 'text-slate-400' : 'text-sky-100') : 'text-slate-400'}`}>
                       {msg.isEdited && !msg.isDeleted && <span className="opacity-80 font-medium">(düzenlendi)</span>}
                       <span>{timeString}</span>
@@ -136,13 +155,15 @@ export default function SharedChat({ currentUser }) {
                   
                   {/* Menu Options */}
                   {activeMenuId === msg.id && (
-                    <div className="mt-1.5 flex gap-2 justify-end mr-1 animate-in fade-in duration-200">
-                      <button 
-                        onClick={() => handleEditClick(msg)}
-                        className="text-xs font-medium bg-white text-slate-600 px-3 py-1.5 rounded-lg shadow-sm border border-slate-100 hover:bg-slate-50 transition-colors"
-                      >
-                        Düzenle
-                      </button>
+                    <div className="mt-1.5 flex gap-2 justify-end mr-1 animate-in fade-in duration-200 z-10">
+                      {msg.type !== 'image' && (
+                        <button 
+                          onClick={() => handleEditClick(msg)}
+                          className="text-xs font-medium bg-white text-slate-600 px-3 py-1.5 rounded-lg shadow-sm border border-slate-100 hover:bg-slate-50 transition-colors"
+                        >
+                          Düzenle
+                        </button>
+                      )}
                       <button 
                         onClick={() => handleDelete(msg.id)}
                         className="text-xs font-medium bg-white text-red-500 px-3 py-1.5 rounded-lg shadow-sm border border-red-100 hover:bg-red-50 transition-colors"
