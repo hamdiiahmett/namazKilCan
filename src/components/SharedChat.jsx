@@ -14,6 +14,7 @@ export default function SharedChat({ currentUser }) {
   const [editText, setEditText] = useState('');
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   useEffect(() => {
@@ -100,16 +101,16 @@ export default function SharedChat({ currentUser }) {
   };
   return (
     <div
-      style={{ height: isFullscreen ? viewportHeight : undefined }}
+      style={{ height: (isFullscreen || isFocused) ? viewportHeight : '100%' }}
       className={`bg-white/80 backdrop-blur-sm shadow-sm border border-sky-100/50 flex flex-col overflow-hidden w-full transition-all duration-300 ease-in-out
-        ${isFullscreen
-          ? 'fixed inset-0 z-[100] rounded-none bg-white/95'
-          : 'rounded-3xl sm:rounded-[2rem] h-[100dvh] sm:h-[600px] relative'}`}
+        ${(isFullscreen || isFocused)
+          ? 'fixed inset-0 z-[100] rounded-none bg-white sm:max-w-xl sm:mx-auto'
+          : 'rounded-3xl sm:rounded-[2rem] h-full relative'}`}
     >
       <div className={`bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center ${isFullscreen ? 'sm:px-6' : ''}`}>
         <h2 className="font-bold text-slate-700"> Sohbetcan 💭</h2>
         <div className="flex items-center gap-2">
-          <span className="text-xs bg-white/60 px-2 py-1 rounded-full text-slate-500 font-medium hidden sm:inline-block">Uçtan Uca Şifresiz 🙈</span>
+          <span className="text-xs bg-white/60 px-2 py-1 rounded-full text-slate-500 font-medium hidden sm:inline-block">🧡</span>
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
             className="p-1.5 rounded-full bg-white/60 text-slate-600 hover:text-slate-800 hover:bg-white/80 transition-colors shadow-sm"
@@ -228,6 +229,10 @@ export default function SharedChat({ currentUser }) {
           type="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => {
+            setTimeout(() => setIsFocused(false), 150);
+          }}
           placeholder="Tatlı bir şeyler yaz..."
           className="flex-1 bg-slate-50 border-none rounded-full px-4 py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-[16px] font-medium min-w-0"
         />
