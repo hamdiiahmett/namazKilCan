@@ -10,6 +10,9 @@ function App() {
   });
   const [activeTab, setActiveTab] = useState('chat');
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [vph, setVph] = useState(
+    () => window.visualViewport?.height ?? window.innerHeight
+  );
 
   useEffect(() => {
     localStorage.setItem('currentUser', currentUser);
@@ -18,10 +21,14 @@ function App() {
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
-        setIsKeyboardOpen(window.visualViewport.height < window.innerHeight - 150);
+        const h = window.visualViewport.height;
+        setVph(h);
+        setIsKeyboardOpen(h < window.innerHeight - 150);
       }
     };
     if (window.visualViewport) {
+      // Set initial
+      handleResize();
       window.visualViewport.addEventListener('resize', handleResize);
     }
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
@@ -30,7 +37,7 @@ function App() {
   const TAB_NAV_H = 72; // px - bottom nav height
 
   return (
-    <div className="h-[100dvh] bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col overflow-hidden w-full">
+    <div style={{ height: vph }} className="bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col overflow-hidden w-full relative">
       {/* Header — always visible */}
       <div className="flex-shrink-0 z-30">
         <Header currentUser={currentUser} setCurrentUser={setCurrentUser} />
@@ -49,8 +56,8 @@ function App() {
 
       {/* Bottom Tab Bar */}
       {!isKeyboardOpen && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 z-50 flex justify-around items-center px-6 py-2"
-          style={{ paddingBottom: `calc(8px + env(safe-area-inset-bottom))` }}>
+        <div className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 z-50 flex justify-around items-center px-6 py-2"
+          style={{ paddingBottom: `calc(8px + env(safe-area-inset-bottom))`, height: `${TAB_NAV_H}px` }}>
           <button onClick={() => setActiveTab('namaz')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'namaz' ? 'text-sky-500' : 'text-slate-400'}`}>
             <span className={`text-2xl transition-transform duration-200 ${activeTab === 'namaz' ? 'scale-110' : ''}`}>🕌</span>
             <span className="text-[10px] font-bold tracking-wide">Namaz</span>

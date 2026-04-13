@@ -13,14 +13,10 @@ export default function SharedChat({ currentUser }) {
   const [editingId,    setEditingId]    = useState(null);
   const [editText,     setEditText]     = useState('');
 
-  // VisualViewport height — shrinks when keyboard opens
-  const [vph, setVph] = useState(
-    () => window.visualViewport?.height ?? window.innerHeight
-  );
-
+  // VisualViewport height — shrinks when keyboard opens (Legacy - now handled globally via App)
+  // Instead, just listen for resize to auto-scroll to bottom of chat
   useEffect(() => {
     const handler = () => {
-      setVph(window.visualViewport?.height ?? window.innerHeight);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
     };
     window.visualViewport?.addEventListener('resize', handler);
@@ -85,8 +81,7 @@ export default function SharedChat({ currentUser }) {
         3. Input bar         — flex-shrink-0
     */
     <div
-      style={{ height: vph }}
-      className="flex flex-col w-full max-w-[500px] mx-auto bg-fuchsia-50 overflow-hidden shadow-lg border-x border-slate-100/50"
+      className="flex flex-col h-full w-full max-w-[500px] mx-auto bg-fuchsia-50 overflow-hidden shadow-lg border-x border-slate-100/50"
     >
 
       {/* ── 1. Chat header card ─────────────────── */}
