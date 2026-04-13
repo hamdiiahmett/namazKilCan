@@ -46,7 +46,9 @@ export default function SharedChat({ currentUser }) {
     const handleResize = () => {
       if (window.visualViewport) {
         setViewportHeight(`${window.visualViewport.height}px`);
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
       }
     };
 
@@ -102,7 +104,7 @@ export default function SharedChat({ currentUser }) {
       className={`bg-white/80 backdrop-blur-sm shadow-sm border border-sky-100/50 flex flex-col overflow-hidden w-full transition-all duration-300 ease-in-out
         ${isFullscreen
           ? 'fixed inset-0 z-[100] rounded-none bg-white/95'
-          : 'rounded-3xl sm:rounded-[2rem] h-[60vh] sm:h-[500px] relative'}`}
+          : 'rounded-3xl sm:rounded-[2rem] h-[100dvh] sm:h-[600px] relative'}`}
     >
       <div className={`bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center ${isFullscreen ? 'sm:px-6' : ''}`}>
         <h2 className="font-bold text-slate-700"> Sohbetcan 💭</h2>
@@ -159,7 +161,7 @@ export default function SharedChat({ currentUser }) {
                         setActiveMenuId(activeMenuId === msg.id ? null : msg.id);
                       }
                     }}
-                    className={`max-w-[85%] sm:max-w-[75%] px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-sm relative text-[14px] sm:text-[15px] leading-relaxed transition-colors ${isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : ''}
+                    className={`max-w-[80%] sm:max-w-[75%] px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-sm relative text-[14px] sm:text-[15px] leading-relaxed transition-colors ${isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : ''}
                       ${isMe
                         ? msg.isDeleted
                           ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none'
@@ -227,14 +229,14 @@ export default function SharedChat({ currentUser }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Tatlı bir şeyler yaz..."
-          className="flex-1 bg-slate-50 border-none rounded-full px-4 py-2.5 sm:py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-[16px] font-medium min-w-0"
+          className="flex-1 bg-slate-50 border-none rounded-full px-4 py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-[16px] font-medium min-w-0"
         />
         <button
           type="submit"
           disabled={!text.trim()}
-          className="bg-sky-400 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 rounded-full flex items-center justify-center transition-colors shadow-sm"
+          className="bg-sky-400 hover:bg-sky-500 disabled:bg-slate-200 disabled:text-slate-400 text-white w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 rounded-full flex items-center justify-center transition-colors shadow-sm"
         >
-          <Send size={18} className="translate-x-0.5" />
+          <Send size={20} className="translate-x-0.5" />
         </button>
       </form>
     </div>
