@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { rtdb } from '../firebase';
 import { ref, onValue, push, serverTimestamp, update } from 'firebase/database';
 import { Send } from 'lucide-react';
@@ -13,9 +14,13 @@ export default function SharedChat({ currentUser }) {
   const [editingId,    setEditingId]    = useState(null);
   const [editText,     setEditText]     = useState('');
 
-  // VisualViewport height — shrinks when keyboard opens (Legacy - now handled globally via App)
-  // Instead, just listen for resize to auto-scroll to bottom of chat
+  const [portalRoot, setPortalRoot] = useState(null);
+
   useEffect(() => {
+    // Portal element App.jsx içinden geliyor
+    setPortalRoot(document.getElementById('chat-input-portal'));
+    
+    // Resize listeners to keep messages scrolled
     const handler = () => {
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
     };
@@ -72,20 +77,32 @@ export default function SharedChat({ currentUser }) {
     setEditingId(null);
   };
 
-  return (
-    /*
-      height = visualViewport height → shrinks with keyboard.
-      The 3 children are:
-        1. Chat header card  — flex-shrink-0
-        2. Message list      — flex-1 min-h-0 overflow-y-auto   (only this scrolls)
-        3. Input bar         — flex-shrink-0
-    */
-    <div
-      className="flex flex-col h-full w-full max-w-[500px] mx-auto bg-fuchsia-50 overflow-hidden shadow-lg border-x border-slate-100/50"
+  const inputForm = (
+    <form
+      onSubmit={handleSend}
+      className="px-3 pt-2 pb-3 bg-fuchsia-50/95 backdrop-blur-md border-t border-slate-200 flex gap-2 w-full"
     >
+      <input
+        type="text"
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Tatlı bir şeyler yaz..."
+        className="flex-1 bg-white border border-slate-200 rounded-full px-4 py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-[16px] font-medium min-w-0 shadow-sm"
+      />
+      <button
+        type="submit"
+        disabled={!text.trim()}
+        className="bg-sky-400 hover:bg-sky-500 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 text-white w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-sm"
+      >
+        <Send size={20} className="translate-x-0.5" />
+      </button>
+    </form>
+  );
 
+  return (
+    <div className="flex flex-col h-full w-full mx-auto overflow-hidden">
       {/* ── 1. Chat header card ─────────────────── */}
-      <div className="flex-shrink-0 px-3 pt-2 pb-1 z-20">
+      <div className="flex-shrink-0 z-20 sticky top-0 bg-fuchsia-50/90 backdrop-blur-sm px-3 pt-2 pb-1">
         <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm border border-sky-100 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-lg">💬</span>
@@ -95,8 +112,8 @@ export default function SharedChat({ currentUser }) {
         </div>
       </div>
 
-      {/* ── 2. Messages — ONLY this section scrolls ─── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-3">
+      {/* ── 2. Messages ─────────────────────────── */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-3 pb-[180px]">
         {messages.length === 0 && (
           <div className="h-full flex items-center justify-center text-slate-300 font-medium italic text-sm">
             Henüz kimse bir şey yazmamış...
@@ -110,7 +127,6 @@ export default function SharedChat({ currentUser }) {
 
           return (
             <div key={msg.id || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-
               {editingId === msg.id ? (
                 /* Edit mode */
                 <div className="w-full max-w-[92%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
@@ -211,26 +227,8 @@ export default function SharedChat({ currentUser }) {
         <div ref={messagesEndRef} className="pb-4" />
       </div>
 
-      {/* ── 3. Input bar — sticks to bottom, above keyboard ─── */}
-      <form
-        onSubmit={handleSend}
-        className="flex-shrink-0 z-20 px-3 pt-2 pb-3 bg-fuchsia-50 border-t border-slate-100/80 flex gap-2"
-      >
-        <input
-          type="text"
-          value={text}
-          onChange={e => setText(e.target.value)}
-          placeholder="Tatlı bir şeyler yaz..."
-          className="flex-1 bg-white border border-slate-200 rounded-full px-4 py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-[16px] font-medium min-w-0 shadow-sm"
-        />
-        <button
-          type="submit"
-          disabled={!text.trim()}
-          className="bg-sky-400 hover:bg-sky-500 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 text-white w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-sm"
-        >
-          <Send size={20} className="translate-x-0.5" />
-        </button>
-      </form>
+      {/* ── 3. Input bar injected into App.jsx portal ─── */}
+      {portalRoot ? createPortal(inputForm, portalRoot) : inputForm}
     </div>
   );
 }
