@@ -3,12 +3,13 @@ import Header from './components/Header';
 import PrayerTracker from './components/PrayerTracker';
 import SharedChat from './components/SharedChat';
 import SharedCanvas from './components/SharedCanvas';
+import Home from './components/Home';
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     return localStorage.getItem('currentUser') || 'zenep';
   });
-  const [activeTab, setActiveTab] = useState('chat');
+  const [activeTab, setActiveTab] = useState('home');
   const [vph, setVph] = useState(() => window.visualViewport?.height ?? window.innerHeight);
   const [kbOffset, setKbOffset] = useState(0);
 
@@ -73,6 +74,7 @@ function App() {
       {/* Main content - Dynamic padding at the top for messages optionally handled by chat */}
       <main className="flex-1 min-h-0 w-full max-w-[500px] mx-auto flex flex-col relative bg-fuchsia-50 pb-[140px]">
         <div className={`flex-1 min-h-0 w-full flex flex-col ${activeTab !== 'chat' ? 'overflow-y-auto overflow-x-hidden pt-3' : ''}`}>
+          {activeTab === 'home' && <Home />}
           {activeTab === 'namaz' && <PrayerTracker />}
           {activeTab === 'chat' && <SharedChat currentUser={currentUser} />}
           {activeTab === 'canvas' && <div className="px-2 sm:px-4"><SharedCanvas currentUser={currentUser} /></div>}
@@ -88,7 +90,11 @@ function App() {
         <div id="chat-input-portal" className="pointer-events-auto w-full flex-shrink-0" />
 
         {/* Alt Menü Tab Bar */}
-        <div className="pointer-events-auto flex-shrink-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 flex justify-around items-center px-6 py-2 pb-[max(8px,env(safe-area-inset-bottom))] w-full">
+        <div className="pointer-events-auto flex-shrink-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 flex justify-around items-center px-2 sm:px-6 py-2 pb-[max(8px,env(safe-area-inset-bottom))] w-full">
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'home' ? 'text-amber-500 scale-110' : 'text-slate-400'}`}>
+            <span className="text-2xl">🏠</span>
+            <span className="text-[10px] font-bold tracking-wide">Ana</span>
+          </button>
           <button onClick={() => setActiveTab('namaz')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'namaz' ? 'text-sky-500 scale-110' : 'text-slate-400'}`}>
             <span className="text-2xl">🕌</span>
             <span className="text-[10px] font-bold tracking-wide">Namaz</span>
