@@ -207,8 +207,8 @@ export default function SharedChat({ currentUser }) {
           );
         })}
 
-        {/* Scroll anchor */}
-        <div ref={messagesEndRef} />
+        {/* Scroll anchor with padding so last message doesn't hug input edge */}
+        <div ref={messagesEndRef} className="pb-4" />
       </div>
 
       {/* ── 3. Input bar — sticks to bottom, above keyboard ─── */}
