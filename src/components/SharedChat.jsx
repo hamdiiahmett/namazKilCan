@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onValue, push, serverTimestamp, update } from 'firebase/database';
-import { Send } from 'lucide-react';
+import { Send, Maximize2, Minimize2 } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function SharedChat({ currentUser }) {
@@ -12,6 +12,9 @@ export default function SharedChat({ currentUser }) {
   const [activeMenuId, setActiveMenuId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState('');
+  
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   useEffect(() => {
     const chatRef = ref(rtdb, 'chat/messages');
@@ -33,8 +36,31 @@ export default function SharedChat({ currentUser }) {
 
   useEffect(() => {
     // Scroll to bottom
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const scrollToBottom = () => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+    scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize);
+      setViewportHeight(`${window.visualViewport.height}px`);
+    }
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
+      }
+    };
+  }, []);
 
   const handleSend = (e) => {
     e.preventDefault();
@@ -71,10 +97,25 @@ export default function SharedChat({ currentUser }) {
     setEditingId(null);
   };
   return (
-    <div className="bg-white/80 backdrop-blur-sm rounded-3xl sm:rounded-[2rem] shadow-sm border border-sky-100/50 flex flex-col overflow-hidden h-[60vh] sm:h-[500px] w-full">
-      <div className="bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center">
+    <div 
+      style={{ height: isFullscreen ? viewportHeight : undefined }}
+      className={`bg-white/80 backdrop-blur-sm shadow-sm border border-sky-100/50 flex flex-col overflow-hidden w-full transition-all duration-300 ease-in-out
+        ${isFullscreen 
+          ? 'fixed inset-0 z-[100] rounded-none bg-white/95' 
+          : 'rounded-3xl sm:rounded-[2rem] h-[60vh] sm:h-[500px] relative'}`}
+    >
+      <div className={`bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center ${isFullscreen ? 'sm:px-6' : ''}`}>
         <h2 className="font-bold text-slate-700">Ortak Not Defteri 💭</h2>
-        <span className="text-xs bg-white/60 px-2 py-1 rounded-full text-slate-500 font-medium">Uçtan Uca Şifresiz 🙈</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs bg-white/60 px-2 py-1 rounded-full text-slate-500 font-medium hidden sm:inline-block">Uçtan Uca Şifresiz 🙈</span>
+          <button 
+            onClick={() => setIsFullscreen(!isFullscreen)} 
+            className="p-1.5 rounded-full bg-white/60 text-slate-600 hover:text-slate-800 hover:bg-white/80 transition-colors shadow-sm"
+            title="Tam Ekran"
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 bg-slate-50/50 flex flex-col relative">
@@ -98,7 +139,7 @@ export default function SharedChat({ currentUser }) {
                      autoFocus
                      value={editText} 
                      onChange={e => setEditText(e.target.value)}
-                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-sky-300 transition-colors"
+                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[16px] outline-none focus:border-sky-300 transition-colors"
                      onKeyDown={(e) => {
                         if (e.key === 'Enter') handleSaveEdit(msg.id);
                         if (e.key === 'Escape') setEditingId(null);
@@ -186,7 +227,7 @@ export default function SharedChat({ currentUser }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Tatlı bir şeyler yaz..."
-          className="flex-1 bg-slate-50 border-none rounded-full px-4 py-2.5 sm:py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-sm sm:text-base font-medium min-w-0"
+          className="flex-1 bg-slate-50 border-none rounded-full px-4 py-2.5 sm:py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-[16px] font-medium min-w-0"
         />
         <button 
           type="submit" 
