@@ -13,19 +13,19 @@ export default function Header({ currentUser, setCurrentUser }) {
       <div className="max-w-xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0">
         <div className="flex flex-col items-center sm:items-start w-full sm:w-auto">
           <h1 className="text-2xl sm:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-sky-400 drop-shadow-sm text-center sm:text-left">
-            Namaz Kıl CAN 🌸
+            CANCAN 🌸
           </h1>
           <p className="text-[11px] sm:text-sm font-medium text-slate-400 animate-pulse mt-1">
-            Cihazınızı seçmek için profilinize dokunun 👇
+            Cihazınızı seçmek için profilinize dokunun :o
           </p>
         </div>
-        
+
         <div className="flex gap-6 sm:gap-8 items-center justify-center">
           {users.map(user => {
             const isActive = currentUser === user.id;
             return (
-              <div 
-                key={user.name} 
+              <div
+                key={user.name}
                 onClick={() => setCurrentUser(user.id)}
                 className={`flex flex-col sm:flex-row items-center gap-1 sm:gap-2 group cursor-pointer transition-transform duration-300 ${isActive ? 'scale-105 sm:scale-110' : 'opacity-70 hover:opacity-100'}`}
               >
