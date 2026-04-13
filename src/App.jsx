@@ -27,35 +27,41 @@ function App() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
+  const TAB_NAV_H = 72; // px - bottom nav height
+
   return (
-    <div className="h-[100dvh] bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col relative w-full pt-safe">
-      {activeTab !== 'chat' && (
-        <div className="flex-shrink-0">
-          <Header currentUser={currentUser} setCurrentUser={setCurrentUser} />
-        </div>
-      )}
-      
-      <main className={`flex-1 w-full max-w-xl mx-auto flex flex-col relative ${activeTab === 'chat' ? 'px-0 sm:px-4' : 'px-2 sm:px-4 mt-2 sm:mt-4'}`} style={{ paddingBottom: isKeyboardOpen ? '0' : '72px' }}>
-        <div className={`flex-1 w-full relative ${activeTab === 'chat' ? 'h-full' : 'overflow-y-auto overflow-x-hidden'}`}>
+    <div className="h-[100dvh] bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col overflow-hidden w-full">
+      {/* Header — always visible */}
+      <div className="flex-shrink-0 z-30">
+        <Header currentUser={currentUser} setCurrentUser={setCurrentUser} />
+      </div>
+
+      {/* Main content — grows to fill remaining space */}
+      <main className="flex-1 min-h-0 w-full max-w-xl mx-auto flex flex-col relative"
+        style={{ paddingBottom: isKeyboardOpen ? '0' : `${TAB_NAV_H}px` }}>
+
+        <div className={`flex-1 min-h-0 w-full ${activeTab !== 'chat' ? 'overflow-y-auto overflow-x-hidden px-2 sm:px-4 pt-3 pb-2' : ''}`}>
           {activeTab === 'namaz' && <PrayerTracker />}
           {activeTab === 'chat' && <SharedChat currentUser={currentUser} />}
-          {activeTab === 'canvas' && <SharedCanvas currentUser={currentUser} />}
+          {activeTab === 'canvas' && <div className="px-2 sm:px-4"><SharedCanvas currentUser={currentUser} /></div>}
         </div>
       </main>
 
+      {/* Bottom Tab Bar */}
       {!isKeyboardOpen && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-200 z-50 px-6 py-3 flex justify-around sm:justify-center sm:gap-12 pb-[calc(12px+env(safe-area-inset-bottom))]">
-          <button onClick={() => setActiveTab('namaz')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'namaz' ? 'text-sky-500 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
-            <span className="text-xl">🕌</span>
-            <span className="text-[10px] font-bold">Namaz</span>
+        <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 z-50 flex justify-around items-center px-6 py-2"
+          style={{ paddingBottom: `calc(8px + env(safe-area-inset-bottom))` }}>
+          <button onClick={() => setActiveTab('namaz')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'namaz' ? 'text-sky-500' : 'text-slate-400'}`}>
+            <span className={`text-2xl transition-transform duration-200 ${activeTab === 'namaz' ? 'scale-110' : ''}`}>🕌</span>
+            <span className="text-[10px] font-bold tracking-wide">Namaz</span>
           </button>
-          <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'chat' ? 'text-pink-500 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
-            <span className="text-xl">💬</span>
-            <span className="text-[10px] font-bold">Sohbet</span>
+          <button onClick={() => setActiveTab('chat')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'chat' ? 'text-pink-500' : 'text-slate-400'}`}>
+            <span className={`text-2xl transition-transform duration-200 ${activeTab === 'chat' ? 'scale-110' : ''}`}>💬</span>
+            <span className="text-[10px] font-bold tracking-wide">Sohbet</span>
           </button>
-          <button onClick={() => setActiveTab('canvas')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'canvas' ? 'text-purple-500 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
-            <span className="text-xl">🎨</span>
-            <span className="text-[10px] font-bold">Çizim</span>
+          <button onClick={() => setActiveTab('canvas')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'canvas' ? 'text-purple-500' : 'text-slate-400'}`}>
+            <span className={`text-2xl transition-transform duration-200 ${activeTab === 'canvas' ? 'scale-110' : ''}`}>🎨</span>
+            <span className="text-[10px] font-bold tracking-wide">Çizim</span>
           </button>
         </div>
       )}
