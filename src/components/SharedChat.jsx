@@ -86,7 +86,7 @@ export default function SharedChat({ currentUser }) {
     */
     <div
       style={{ height: vph }}
-      className="flex flex-col w-full bg-fuchsia-50 overflow-hidden"
+      className="flex flex-col w-full max-w-[500px] mx-auto bg-fuchsia-50 overflow-hidden shadow-lg border-x border-slate-100/50"
     >
 
       {/* ── 1. Chat header card ─────────────────── */}
@@ -142,7 +142,7 @@ export default function SharedChat({ currentUser }) {
                 </div>
               ) : (
                 /* Normal bubble */
-                <div className="flex flex-col items-end w-full">
+                <div className={`flex flex-col w-full ${isMe ? 'items-end' : 'items-start'}`}>
                   <div
                     onClick={() => {
                       if (isMe && !msg.isDeleted)
