@@ -101,23 +101,14 @@ export default function SharedChat({ currentUser }) {
   };
   return (
     <div
-      style={{ height: (isFullscreen || isFocused) ? viewportHeight : '100%' }}
-      className={`bg-white/80 backdrop-blur-sm shadow-sm border border-sky-100/50 flex flex-col overflow-hidden w-full transition-all duration-300 ease-in-out
-        ${(isFullscreen || isFocused)
-          ? 'fixed inset-0 z-[100] rounded-none bg-white sm:max-w-xl sm:mx-auto'
-          : 'rounded-3xl sm:rounded-[2rem] h-full relative'}`}
+      style={{ height: isFocused ? viewportHeight : '100%' }}
+      className={`bg-white/80 backdrop-blur-sm shadow-sm border border-sky-100/50 flex flex-col w-full transition-all duration-300 ease-in-out h-full relative
+        ${isFocused ? 'fixed inset-0 z-[100] bg-white sm:max-w-xl sm:mx-auto' : 'sm:rounded-[2rem]'}`}
     >
-      <div className={`bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center ${isFullscreen ? 'sm:px-6' : ''}`}>
+      <div className="bg-gradient-to-r from-sky-100 to-pink-100 p-4 border-b border-white shadow-sm z-10 flex justify-between items-center sm:px-6">
         <h2 className="font-bold text-slate-700"> Sohbetcan 💭</h2>
         <div className="flex items-center gap-2">
           <span className="text-xs bg-white/60 px-2 py-1 rounded-full text-slate-500 font-medium hidden sm:inline-block">🧡</span>
-          <button
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 rounded-full bg-white/60 text-slate-600 hover:text-slate-800 hover:bg-white/80 transition-colors shadow-sm"
-            title="Tam Ekran"
-          >
-            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </button>
         </div>
       </div>
 
