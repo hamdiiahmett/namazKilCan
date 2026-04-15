@@ -4,8 +4,8 @@ import Header from './components/Header';
 // Lazy loading components for performance
 const Home = lazy(() => import('./components/Home'));
 const PrayerTracker = lazy(() => import('./components/PrayerTracker'));
-const SharedChat    = lazy(() => import('./components/SharedChat'));
-const SharedCanvas  = lazy(() => import('./components/SharedCanvas'));
+const SharedChat = lazy(() => import('./components/SharedChat'));
+const SharedCanvas = lazy(() => import('./components/SharedCanvas'));
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -26,7 +26,7 @@ function App() {
         const height = vv.height;
         const kh = window.innerHeight - height;
         const isOpen = kh > 150;
-        
+
         if (isOpen) {
           setKbOffset(kh);
         } else {
@@ -51,7 +51,7 @@ function App() {
       className="bg-slate-50 text-slate-800 font-sans selection:bg-sky-100 flex flex-col overflow-hidden"
       style={{ position: 'fixed', inset: 0 }}
     >
-      {/* Header */}
+      {/* Header kismi */}
       <div className="flex-shrink-0 z-30">
         <Header currentUser={currentUser} setCurrentUser={setCurrentUser} />
       </div>
@@ -69,7 +69,7 @@ function App() {
       </main>
 
       {/* Alt Menü Tab Bar */}
-      <div 
+      <div
         className="absolute left-0 right-0 z-[9999] flex flex-col justify-end w-full max-w-[500px] mx-auto pointer-events-none"
         style={{ bottom: `${kbOffset}px` }}
       >
