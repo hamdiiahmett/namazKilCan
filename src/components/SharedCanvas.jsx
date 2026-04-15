@@ -1,7 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { rtdb } from '../firebase';
-import { ref, onValue, push, set, serverTimestamp, remove, update } from 'firebase/database';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { ref, onValue, push, set, serverTimestamp, update } from 'firebase/database';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PURE HELPERS
@@ -20,22 +19,22 @@ function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
   sx = Math.floor(sx); sy = Math.floor(sy);
   const W = canvas.width, H = canvas.height;
   if (sx < 0 || sx >= W || sy < 0 || sy >= H) return false;
-  
+
   const imgData = ctx.getImageData(0, 0, W, H);
   const d = imgData.data;
   const si = (sy * W + sx) * 4;
   const [sr, sg, sb, sa] = [d[si], d[si + 1], d[si + 2], d[si + 3]];
   const [fr, fg, fb] = hexToRgb(fillHex);
-  
+
   if (sr === fr && sg === fg && sb === fb && sa === 255) return false;
-  
+
   const match = i =>
     Math.abs(d[i] - sr) <= tol && Math.abs(d[i + 1] - sg) <= tol &&
     Math.abs(d[i + 2] - sb) <= tol && Math.abs(d[i + 3] - sa) <= tol;
-    
+
   const stack = [sy * W + sx];
   const vis = new Uint8Array(W * H);
-  
+
   while (stack.length > 0) {
     const lin = stack.pop();
     if (vis[lin]) continue;
@@ -59,372 +58,367 @@ function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
 
 const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- REFS ---
-  const canvasRef = useRef(null);
-  const offscreenRef = useRef(null); 
-  const contextRef = useRef(null);
-  const pointsRef = useRef([]);
-  const isDrawingRef = useRef(false);
-  const lastSyncTimeRef = useRef(0);
-  const strokeIdRef = useRef(null);
-  const redrawRequestRef = useRef(null);
+  const canvasRef      = useRef(null);
+  const offscreenRef   = useRef(null);
+  const contextRef     = useRef(null);
+  const pointsRef      = useRef([]);        // live stroke points (never pushed to firebase mid-stroke)
+  const isDrawingRef   = useRef(false);
+  const strokeIdRef    = useRef(null);
+  const redrawRafRef   = useRef(null);
 
-  // --- CONFIG / PALETTE ---
+  // --- PALETTE ---
   const mainColors = ['#ff808b', '#3bc1fb', '#34d399', '#fbbd23', '#a78bfa', '#475569'];
 
-  // --- LOCAL STATE (ISOLATED) ---
-  const [slots, setSlots] = useState(['#34d399', '#a78bfa', '#e2e8f0', '#e2e8f0']);
+  // --- STATE ---
+  const [slots, setSlots]           = useState(['#34d399', '#a78bfa', '#e2e8f0', '#e2e8f0']);
   const [activeSlot, setActiveSlot] = useState(1);
-  const [tool, setTool] = useState('pencil'); 
-  const [brushSize, setBrushSize] = useState(10);
+  const [tool, setTool]             = useState('pencil');
+  const [brushSize, setBrushSize]   = useState(10);
   const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // --- SYNC STATE ---
-  const [redoStack, setRedoStack] = useState([]); 
+  const [redoStack, setRedoStack]   = useState([]);
   const [allSegments, setAllSegments] = useState([]);
 
-  // --- DERIVED ---
   const currentColor = slots[activeSlot] || '#000000';
 
-  // --- SIMPLE CONTINUOUS REDRAW LOGIC ---
+  // ─────────────────────────────────────────────────────────────────────────
+  //  REDRAW: layered rendering so each user's eraser is isolated
+  // ─────────────────────────────────────────────────────────────────────────
 
-  const drawStrokeGroup = useCallback((ctx, canvas, stroke) => {
+  const drawOneStroke = useCallback((ctx, canvas, stroke) => {
     if (stroke.type === 'fill') {
-        runFloodFill(ctx, canvas, stroke.x, stroke.y, stroke.color);
-        return;
+      runFloodFill(ctx, canvas, stroke.x, stroke.y, stroke.color);
+      return;
     }
-    
-    if (stroke.type === 'draw' && stroke.points && stroke.points.length > 0) {
-        ctx.lineWidth = stroke.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        
-        if (stroke.tool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = stroke.size * 5; 
-        } else {
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.strokeStyle = stroke.color;
-        }
+    if (stroke.type !== 'draw' || !stroke.points || stroke.points.length < 2) return;
 
-        const pts = stroke.points;
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) {
-            ctx.lineTo(pts[i].x, pts[i].y);
-        }
-        ctx.stroke();
-    }
+    const pts = stroke.points;
+    ctx.lineWidth  = stroke.tool === 'eraser' ? stroke.size * 5 : stroke.size;
+    ctx.lineCap    = 'round';
+    ctx.lineJoin   = 'round';
+    ctx.strokeStyle = stroke.color;
+    ctx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
   }, []);
 
   const redrawAll = useCallback((segments) => {
-    if (redrawRequestRef.current) cancelAnimationFrame(redrawRequestRef.current);
+    if (redrawRafRef.current) cancelAnimationFrame(redrawRafRef.current);
 
-    redrawRequestRef.current = requestAnimationFrame(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    redrawRafRef.current = requestAnimationFrame(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
 
-        if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
-        const offscreen = offscreenRef.current;
-        offscreen.width = canvas.width;
-        offscreen.height = canvas.height;
-        const octx = offscreen.getContext('2d', { willReadFrequently: true });
+      // White background
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        const userStrokeGroups = {};
-        segments.forEach(seg => {
-            const uid = seg.senderId || 'Anonim';
-            if (!userStrokeGroups[uid]) userStrokeGroups[uid] = [];
-            
-            if (seg.type === 'fill') {
-                userStrokeGroups[uid].push({ ...seg });
-            } else if (seg.type === 'draw') {
-                let sGroup = userStrokeGroups[uid].find(g => g.strokeId === seg.strokeId && g.type === 'draw');
-                if (!sGroup) {
-                    sGroup = { type: 'draw', strokeId: seg.strokeId, tool: seg.tool, color: seg.color, size: seg.size, points: [] };
-                    userStrokeGroups[uid].push(sGroup);
-                }
-                if (seg.curve) sGroup.points.push(seg.start, seg.control, seg.end);
-                else if (seg.p1 && seg.p2) sGroup.points.push(seg.p1, seg.p2);
-            }
-        });
+      // Offscreen scratch canvas (isolates each user's eraser)
+      if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+      const off  = offscreenRef.current;
+      off.width  = canvas.width;
+      off.height = canvas.height;
+      const oc = off.getContext('2d', { willReadFrequently: true });
 
-        const userIds = Object.keys(userStrokeGroups);
-        const sortedIds = [
-            ...userIds.filter(id => id !== currentUser),
-            ...(userStrokeGroups[currentUser] ? [currentUser] : [])
-        ];
+      // Group segments → strokes per user
+      const byUser = {};
+      segments.forEach(seg => {
+        const uid = seg.senderId || 'Anonim';
+        if (!byUser[uid]) byUser[uid] = [];
 
-        sortedIds.forEach(uid => {
-            octx.clearRect(0, 0, offscreen.width, offscreen.height);
-            octx.globalCompositeOperation = 'source-over';
-            userStrokeGroups[uid].forEach(stroke => drawStrokeGroup(octx, offscreen, stroke));
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.drawImage(offscreen, 0, 0);
-        });
+        if (seg.type === 'fill') {
+          byUser[uid].push({ ...seg });
+        } else if (seg.type === 'draw') {
+          let g = byUser[uid].find(x => x.strokeId === seg.strokeId && x.type === 'draw');
+          if (!g) {
+            g = { type: 'draw', strokeId: seg.strokeId, tool: seg.tool, color: seg.color, size: seg.size, points: [] };
+            byUser[uid].push(g);
+          }
+          if (seg.p1 && seg.p2) {
+            g.points.push(seg.p1, seg.p2);
+          } else if (seg.points && Array.isArray(seg.points)) {
+            g.points.push(...seg.points);
+          }
+        }
+      });
+
+      // Render other users first, current user on top (Layered Rendering — Eraser isolation)
+      const others  = Object.keys(byUser).filter(id => id !== currentUser);
+      const ordered = [...others, ...(byUser[currentUser] ? [currentUser] : [])];
+
+      ordered.forEach(uid => {
+        oc.clearRect(0, 0, off.width, off.height);
+        oc.globalCompositeOperation = 'source-over';
+        byUser[uid].forEach(stroke => drawOneStroke(oc, off, stroke));
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(off, 0, 0);
+      });
     });
-  }, [currentUser, drawStrokeGroup]);
+  }, [currentUser, drawOneStroke]);
 
-  // --- SYNC INIT ---
+  // ─────────────────────────────────────────────────────────────────────────
+  //  FIREBASE SYNC (read)
+  // ─────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = canvas.offsetWidth * 2;
+    canvas.width  = canvas.offsetWidth  * 2;
     canvas.height = canvas.offsetHeight * 2;
     contextRef.current = canvas.getContext('2d', { willReadFrequently: true });
 
-    const segmentsRef = ref(rtdb, 'canvas/segments');
-    const unsubscribe = onValue(segmentsRef, (snapshot) => {
-      const data = snapshot.val();
-      const segmentsArray = [];
+    const segRef = ref(rtdb, 'canvas/segments');
+    const unsub  = onValue(segRef, snap => {
+      const data = snap.val();
+      const arr  = [];
       if (data) {
-        Object.keys(data).sort().forEach(key => {
-            if (data[key].type === 'clear') segmentsArray.length = 0;
-            else segmentsArray.push({ ...data[key], key });
+        Object.keys(data).sort().forEach(k => {
+          if (data[k].type === 'clear') arr.length = 0;
+          else arr.push({ ...data[k], key: k });
         });
       }
-      setAllSegments(segmentsArray);
-      redrawAll(segmentsArray);
+      setAllSegments(arr);
+      // Only redraw if user is NOT actively drawing → prevents double-draw "reflection"
+      if (!isDrawingRef.current) redrawAll(arr);
     });
 
     return () => {
-        unsubscribe();
-        if (redrawRequestRef.current) cancelAnimationFrame(redrawRequestRef.current);
+      unsub();
+      if (redrawRafRef.current) cancelAnimationFrame(redrawRafRef.current);
     };
   }, [redrawAll]);
 
-  // --- ACTIONS ---
+  // ─────────────────────────────────────────────────────────────────────────
+  //  GLOBAL INPUT EVENTS
+  // ─────────────────────────────────────────────────────────────────────────
 
-  const stopDrawing = useCallback(() => {
+  const stopDrawing = useCallback(async () => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
+
+    const pts = pointsRef.current;
+    if (pts.length >= 2 && tool !== 'fill') {
+      // Push the ENTIRE stroke at once → redrawAll fires only once → no double-draw
+      await push(ref(rtdb, 'canvas/segments'), {
+        type:     'draw',
+        tool,
+        color:    currentColor,
+        size:     brushSize,
+        points:   pts,           // full array of points stored in one document
+        strokeId: strokeIdRef.current,
+        senderId: currentUser || 'Anonim',
+        timestamp: serverTimestamp(),
+      });
+    }
     pointsRef.current = [];
-  }, []);
+  }, [tool, currentColor, brushSize, currentUser]);
 
   useEffect(() => {
-    const handleGlobalUp = () => stopDrawing();
-    window.addEventListener('mouseup', handleGlobalUp);
-    window.addEventListener('touchend', handleGlobalUp, { passive: false });
-    
-    const fsChange = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', fsChange);
-
+    window.addEventListener('mouseup',  stopDrawing);
+    window.addEventListener('touchend', stopDrawing, { passive: false });
     return () => {
-      window.removeEventListener('mouseup', handleGlobalUp);
-      window.removeEventListener('touchend', handleGlobalUp);
-      document.removeEventListener('fullscreenchange', fsChange);
+      window.removeEventListener('mouseup',  stopDrawing);
+      window.removeEventListener('touchend', stopDrawing);
     };
   }, [stopDrawing]);
 
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen?.();
-    } else {
-        document.exitFullscreen?.();
-    }
-  };
+  // ─────────────────────────────────────────────────────────────────────────
+  //  FULLSCREEN (CSS-only, works on iOS)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const toggleFullscreen = () => setIsFullscreen(f => !f);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  UNDO / REDO
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleUndo = async () => {
     if (allSegments.length === 0) return;
-    const lastOp = allSegments[allSegments.length - 1];
-    
+    const last    = allSegments[allSegments.length - 1];
+    const targets = allSegments.filter(s => s.strokeId === last.strokeId);
+    if (!targets.length) return;
+
+    const deepCopy = JSON.parse(JSON.stringify(targets));
+    setRedoStack(prev => [...prev, { strokeId: last.strokeId, segments: deepCopy }]);
+
     const updates = {};
-    const targetStrokes = allSegments.filter(s => s.strokeId === lastOp.strokeId);
-    
-    if (targetStrokes.length > 0) {
-        const deepCopy = JSON.parse(JSON.stringify(targetStrokes));
-        setRedoStack(prev => [...prev, { type: 'stroke', strokeId: lastOp.strokeId, segments: deepCopy }]);
-        targetStrokes.forEach(seg => updates[seg.key] = null);
-        await update(ref(rtdb, 'canvas/segments'), updates);
-    }
+    targets.forEach(s => { updates[s.key] = null; });
+    await update(ref(rtdb, 'canvas/segments'), updates);
   };
 
   const handleRedo = async () => {
-    if (redoStack.length === 0) return;
-    const toRestore = redoStack[redoStack.length - 1];
-    for (const segData of toRestore.segments) {
-        const { key, ...cleanData } = segData;
-        await push(ref(rtdb, 'canvas/segments'), cleanData);
+    if (!redoStack.length) return;
+    const top = redoStack[redoStack.length - 1];
+    for (const seg of top.segments) {
+      const { key, ...clean } = seg;
+      await push(ref(rtdb, 'canvas/segments'), clean);
     }
     setRedoStack(prev => prev.slice(0, -1));
   };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  CLEAR / SEND TO CHAT
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const clearCanvas = useCallback(async () => {
+    if (!allSegments.length) return;
+    const deepCopy = JSON.parse(JSON.stringify(allSegments));
+    setRedoStack(prev => [...prev, { strokeId: '__clear__', segments: deepCopy }]);
+    await set(ref(rtdb, 'canvas/segments'), null);
+    await push(ref(rtdb, 'canvas/segments'), { type: 'clear' });
+  }, [allSegments]);
 
   const handleSendToChat = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     push(ref(rtdb, 'chat/messages'), {
-      type: 'image',
+      type:     'image',
       imageUrl: canvas.toDataURL('image/png'),
       senderId: currentUser || 'Anonim',
       timestamp: serverTimestamp(),
     });
   };
 
-  const clearCanvas = useCallback(async () => {
-    if (allSegments.length === 0) return;
-    const deepCopy = JSON.parse(JSON.stringify(allSegments));
-    setRedoStack(prev => [...prev, { type: 'clear', segments: deepCopy }]);
-    await set(ref(rtdb, 'canvas/segments'), null);
-    await push(ref(rtdb, 'canvas/segments'), { type: 'clear' });
-  }, [allSegments]);
+  // ─────────────────────────────────────────────────────────────────────────
+  //  LIVE DRAWING (local canvas only — no Firebase writes mid-stroke)
+  // ─────────────────────────────────────────────────────────────────────────
 
-  const getCoordinates = (e) => {
+  const getCoords = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
+    const rect   = canvas.getBoundingClientRect();
+    const scaleX = canvas.width  / rect.width;
     const scaleY = canvas.height / rect.height;
-    let clientX, clientY;
-    if (e.touches && e.touches[0]) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
-    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
-  };
-
-  const syncToFirebase = (seg) => {
-    const now = Date.now();
-    if (now - lastSyncTimeRef.current < 50) return; 
-    lastSyncTimeRef.current = now;
-    push(ref(rtdb, 'canvas/segments'), { 
-        ...seg, 
-        strokeId: strokeIdRef.current, 
-        senderId: currentUser || 'Anonim',
-        timestamp: serverTimestamp()
-    });
+    const src    = e.touches?.[0] ?? e;
+    return {
+      x: (src.clientX - rect.left) * scaleX,
+      y: (src.clientY - rect.top)  * scaleY,
+    };
   };
 
   const startDrawing = (e) => {
-    const coords = getCoordinates(e);
+    const coords = getCoords(e);
     if (!coords) return;
-    
+
     if (tool === 'fill') {
-      const fillData = { type: 'fill', x: coords.x, y: coords.y, color: currentColor, strokeId: Math.random().toString(36).substring(7), senderId: currentUser || 'Anonim' };
-      push(ref(rtdb, 'canvas/segments'), fillData);
+      const strokeId = Math.random().toString(36).substring(7);
+      push(ref(rtdb, 'canvas/segments'), {
+        type: 'fill', x: coords.x, y: coords.y,
+        color: currentColor, strokeId,
+        senderId: currentUser || 'Anonim',
+        timestamp: serverTimestamp(),
+      });
       setRedoStack([]);
       return;
     }
-    
+
     isDrawingRef.current = true;
-    strokeIdRef.current = Math.random().toString(36).substring(7);
-    pointsRef.current = [coords];
+    strokeIdRef.current  = Math.random().toString(36).substring(7);
+    pointsRef.current    = [coords];
     setRedoStack([]);
 
     const ctx = contextRef.current;
-    if (ctx) {
-        ctx.lineWidth = brushSize;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        if (tool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = brushSize * 5;
-        } else {
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.strokeStyle = currentColor;
-        }
-        ctx.beginPath();
-        ctx.moveTo(coords.x, coords.y);
-    }
+    if (!ctx) return;
+    ctx.lineWidth  = tool === 'eraser' ? brushSize * 5 : brushSize;
+    ctx.lineCap    = 'round';
+    ctx.lineJoin   = 'round';
+    ctx.strokeStyle = currentColor;
+    ctx.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
+    ctx.beginPath();
+    ctx.moveTo(coords.x, coords.y);
   };
 
   const draw = (e) => {
     if (!isDrawingRef.current) return;
-    const coords = getCoordinates(e);
+    const coords = getCoords(e);
     if (!coords) return;
-    
+
+    // Draw live — pure moveTo/lineTo, no math, no effects
     const ctx = contextRef.current;
     if (ctx) {
-        ctx.lineTo(coords.x, coords.y);
-        ctx.stroke();
+      ctx.lineTo(coords.x, coords.y);
+      ctx.stroke();
     }
-
-    const prev = pointsRef.current[pointsRef.current.length - 1];
     pointsRef.current.push(coords);
-    syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, p1: prev, p2: coords });
   };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  PALETTE HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handlePaletteClick = (color) => {
-    const nextSlots = [...slots];
-    nextSlots[activeSlot] = color;
-    setSlots(nextSlots);
-    setTool('pencil');
+    const s = [...slots]; s[activeSlot] = color;
+    setSlots(s); setTool('pencil');
+  };
+  const handleWheelChange = (color) => {
+    const s = [...slots]; s[activeSlot] = color;
+    setSlots(s); setTool('pencil');
   };
 
-  const handleWheelChange = (color) => {
-    const nextSlots = [...slots];
-    nextSlots[activeSlot] = color;
-    setSlots(nextSlots);
-    setTool('pencil');
-  };
+  // ─────────────────────────────────────────────────────────────────────────
+  //  RENDER
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div 
-        className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-[99999] bg-slate-900/95 backdrop-blur-md p-4 pt-10' : 'relative'}`}
-    >
-      
-      {/* Header */}
-      <div 
-        className={`w-full max-w-4xl flex justify-between items-center mb-4 px-4 h-16 bg-white/50 backdrop-blur-sm rounded-3xl transition-all ${isFullscreen ? 'fixed top-4 left-4 right-4 z-[100000] max-w-none' : ''}`}
-      >
+    <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 w-full h-[100dvh] z-[9999] bg-white pt-10' : 'relative'}`}>
+
+      {/* ── Header ── */}
+      <div className={`w-full max-w-4xl flex justify-between items-center mb-4 px-4 h-16 bg-white/50 backdrop-blur-sm rounded-3xl transition-all ${isFullscreen ? 'fixed top-4 left-4 right-4 z-[100000] max-w-none shadow-sm border border-slate-100' : ''}`}>
         <div className="flex items-center gap-3">
           <span className="text-2xl">🎨</span>
           <span className="text-lg font-bold text-slate-700 tracking-tight">Çizim Alanı</span>
         </div>
-        
+
         <div className="flex items-center gap-2">
+          {/* Undo / Redo */}
           <div className="flex gap-1 bg-slate-50/50 p-1 rounded-xl">
-            <button 
-                onClick={handleUndo} 
-                disabled={allSegments.length === 0}
-                className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 text-slate-400 rounded-lg disabled:opacity-30 transition-all shadow-sm"
-                title="Geri Al"
-            >
-                <span className="text-xl">↩️</span>
+            <button onClick={handleUndo} disabled={!allSegments.length}
+              className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 rounded-lg disabled:opacity-30 transition-all shadow-sm" title="Geri Al">
+              <span className="text-xl">↩️</span>
             </button>
-            <button 
-                onClick={handleRedo} 
-                disabled={redoStack.length === 0}
-                className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 text-slate-400 rounded-lg disabled:opacity-30 transition-all shadow-sm"
-                title="İleri Al"
-            >
-                <span className="text-xl">↪️</span>
+            <button onClick={handleRedo} disabled={!redoStack.length}
+              className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 rounded-lg disabled:opacity-30 transition-all shadow-sm" title="İleri Al">
+              <span className="text-xl">↪️</span>
             </button>
           </div>
 
-          <button 
-            onClick={toggleFullscreen} 
-            className="w-10 h-10 flex items-center justify-center bg-sky-50/50 hover:bg-sky-100/70 text-sky-600 rounded-xl transition-all shadow-sm shadow-sky-100"
-            title="Tam Ekran"
-          >
-            {isFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+          {/* Fullscreen */}
+          <button onClick={toggleFullscreen}
+            className="w-10 h-10 flex items-center justify-center bg-sky-50/80 hover:bg-sky-100 text-sky-600 rounded-xl transition-all shadow-sm"
+            title="Tam Ekran">
+            {isFullscreen ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/>
+                <path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
+                <path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>
+              </svg>
+            )}
           </button>
 
-          <button 
-            onClick={handleSendToChat} 
-            className="w-10 h-10 flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-500 rounded-xl transition-all shadow-sm shadow-sky-100"
-            title="Sohbete Gönder"
-          >
+          {/* Send to chat */}
+          <button onClick={handleSendToChat}
+            className="w-10 h-10 flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-500 rounded-xl transition-all shadow-sm" title="Sohbete Gönder">
             <span className="text-xl">✈️</span>
           </button>
-          
-          <button 
-            onClick={clearCanvas} 
-            className="w-10 h-10 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-400 rounded-xl transition-all"
-            title="Temizle"
-          >
+
+          {/* Clear */}
+          <button onClick={clearCanvas}
+            className="w-10 h-10 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-400 rounded-xl transition-all" title="Temizle">
             <span className="text-xl">🗑️</span>
           </button>
         </div>
       </div>
 
-      {/* Canvas Area with Dashed Border */}
-      <div className={`relative w-full max-w-4xl bg-white rounded-[2.5rem] p-6 shadow-xl-soft border-2 border-dashed border-slate-200 shadow-canvas transition-all ${isFullscreen ? 'flex-1 w-full max-w-none' : 'aspect-[4/3] sm:aspect-video'}`}>
+      {/* ── Canvas ── */}
+      <div className={`relative w-full max-w-4xl bg-white rounded-[2.5rem] p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all ${isFullscreen ? 'flex-1 w-full max-w-none mb-24' : 'aspect-[4/3] sm:aspect-video'}`}>
         <canvas
           ref={canvasRef}
           onMouseDown={startDrawing}
@@ -434,102 +428,74 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
           className="w-full h-full block cursor-crosshair rounded-[2rem]"
-          style={{ touchAction: 'none' }} 
+          style={{ touchAction: 'none' }}
         />
       </div>
 
-      {/* 3-Row Toolbar */}
-      <div 
-        className={`mt-8 w-full max-w-md flex flex-col gap-5 p-6 bg-white rounded-[3rem] shadow-toolbar border border-slate-50 transition-all ${isFullscreen ? 'fixed bottom-8 z-[100000]' : ''}`}
-      >
-        
-        {/* Row 1: Fixed Colors + Wheel */}
+      {/* ── Toolbar ── */}
+      <div className={`mt-8 w-full max-w-md flex flex-col gap-5 p-6 bg-white rounded-[3rem] shadow-toolbar border border-slate-50 ${isFullscreen ? 'fixed bottom-8 z-[100000]' : ''}`}>
+
+        {/* Row 1: Main colors + wheel */}
         <div className="flex items-center justify-center gap-3">
           {mainColors.map(c => (
-            <button
-              key={c}
-              onClick={() => handlePaletteClick(c)}
+            <button key={c} onClick={() => handlePaletteClick(c)}
               className={`w-10 h-10 rounded-full transition-all border-4 ${currentColor === c ? 'border-indigo-400 scale-110 shadow-lg' : 'border-white hover:scale-105'}`}
-              style={{ backgroundColor: c }}
-            />
+              style={{ backgroundColor: c }} />
           ))}
-          <div className="w-[1px] h-6 bg-slate-100 mx-1" />
-          <div className="relative w-10 h-10 rounded-full overflow-hidden border-4 border-white shadow-sm hover:scale-110 transition-all ring-2 ring-slate-100" style={{ background: 'conic-gradient(from 180deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)' }}>
-            <input 
-              type="color" 
-              value={currentColor} 
-              onChange={(e) => handleWheelChange(e.target.value)} 
-              className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0"
-            />
+          <div className="w-px h-6 bg-slate-100 mx-1" />
+          <div className="relative w-10 h-10 rounded-full overflow-hidden border-4 border-white shadow-sm hover:scale-110 transition-all ring-2 ring-slate-100"
+            style={{ background: 'conic-gradient(from 180deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)' }}>
+            <input type="color" value={currentColor} onChange={e => handleWheelChange(e.target.value)}
+              className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0" />
           </div>
         </div>
 
-        {/* Row 2: Independent Slots & Tools */}
+        {/* Row 2: Slots + tools */}
         <div className="flex items-center justify-center gap-5">
-           <div className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 rounded-2xl">
-              {slots.map((c, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveSlot(i)}
-                  className={`w-8 h-8 rounded-full transition-all border-4 ${activeSlot === i ? 'border-indigo-400 scale-125 shadow-md z-10' : 'border-white opacity-40 hover:opacity-100'}`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-           </div>
-
-           <div className="w-[1px] h-8 bg-slate-200" />
-
-           <div className="flex items-center gap-3">
-              <button 
-                onClick={() => setTool('fill')}
-                className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'fill' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                title="Boya Kovası"
-              >
-                <span className="text-2xl">🪣</span>
-              </button>
-              <button 
-                onClick={() => setTool('eraser')}
-                className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                title="Silgi"
-              >
-                <span className="text-2xl">🧼</span>
-              </button>
-           </div>
+          <div className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 rounded-2xl">
+            {slots.map((c, i) => (
+              <button key={i} onClick={() => setActiveSlot(i)}
+                className={`w-8 h-8 rounded-full transition-all border-4 ${activeSlot === i ? 'border-indigo-400 scale-125 shadow-md z-10' : 'border-white opacity-40 hover:opacity-100'}`}
+                style={{ backgroundColor: c }} />
+            ))}
+          </div>
+          <div className="w-px h-8 bg-slate-200" />
+          <div className="flex items-center gap-3">
+            <button onClick={() => setTool('fill')}
+              className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'fill' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+              title="Boya Kovası">
+              <span className="text-2xl">🪣</span>
+            </button>
+            <button onClick={() => setTool('eraser')}
+              className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+              title="Silgi">
+              <span className="text-2xl">🧼</span>
+            </button>
+          </div>
         </div>
 
-        {/* Row 3: Thickness Slider */}
+        {/* Row 3: Brush size slider */}
         <div className="flex items-center gap-4 bg-slate-50/30 p-3 rounded-2xl">
-           <div className="w-8 h-8 flex items-center justify-center">
-             <div style={{ width: Math.max(2, brushSize/2), height: Math.max(2, brushSize/2), backgroundColor: currentColor, borderRadius: '50%' }} className="transition-all" />
-           </div>
-           <input 
-            type="range" min="1" max="50" value={brushSize} 
-            onChange={(e) => setBrushSize(Number(e.target.value))} 
-            className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-pink-400"
-          />
+          <div className="w-8 h-8 flex items-center justify-center">
+            <div style={{ width: Math.max(2, brushSize / 2), height: Math.max(2, brushSize / 2), backgroundColor: currentColor, borderRadius: '50%' }} className="transition-all" />
+          </div>
+          <input type="range" min="1" max="50" value={brushSize}
+            onChange={e => setBrushSize(Number(e.target.value))}
+            className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-pink-400" />
           <span className="text-[10px] font-bold text-slate-400 w-8">{brushSize}px</span>
         </div>
-
       </div>
-      
+
       <style dangerouslySetInnerHTML={{ __html: `
         .shadow-xl-soft { box-shadow: 0 20px 60px -15px rgba(0,0,0,0.05); }
-        .shadow-canvas { box-shadow: inset 0 0 40px rgba(0,0,0,0.02); }
-        .shadow-toolbar { box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08); }
+        .shadow-toolbar  { box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08); }
         input[type=range]::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          height: 18px;
-          width: 18px;
-          border-radius: 50%;
-          background: #f472b6;
-          box-shadow: 0 2px 10px rgba(244, 114, 182, 0.4);
-          cursor: pointer;
-          border: 3px solid white;
-          transition: all 0.2s;
+          -webkit-appearance:none; height:18px; width:18px; border-radius:50%;
+          background:#f472b6; box-shadow:0 2px 10px rgba(244,114,182,.4);
+          cursor:pointer; border:3px solid white; transition:all .2s;
         }
-        input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+        input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
       `}} />
-
     </div>
   );
 });

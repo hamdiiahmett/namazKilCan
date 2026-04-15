@@ -9,15 +9,15 @@ export default defineConfig({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       manifest: {
-        name: 'Namaz Kıl CAN',
-        short_name: 'NamazCAN',
-        description: 'Tatlı ve minimal namaz takip uygulaması.',
+        name: 'CANCAN',
+        short_name: 'CANCAN',
+        description: 'Zenebimle uygulamamiz.',
         theme_color: '#fdf4ff',
         background_color: '#fdf4ff',
         display: 'standalone',
         icons: [
           {
-            src: 'https://cdn-icons-png.flaticon.com/512/8282/8282928.png',
+            src: 'kalp.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable'
