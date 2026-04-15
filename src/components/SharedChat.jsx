@@ -15,8 +15,7 @@ const MessageBubble = memo(({
   const timeStr = msg.timestamp ? format(new Date(msg.timestamp), 'HH:mm') : '';
 
   return (
-    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-
+    <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
       {/* ── Düzenleme modu ── */}
       {editingId === msg.id ? (
         <div className="w-full max-w-[92%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
@@ -50,13 +49,13 @@ const MessageBubble = memo(({
                 setActiveMenuId(activeMenuId === msg.id ? null : msg.id);
             }}
             className={[
-              'max-w-[80%] px-3 py-2 rounded-2xl shadow-sm relative text-[14px] leading-relaxed transition-colors',
-              isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : '',
+              'max-w-[80%] px-3 py-2 rounded-2xl shadow-sm relative text-[14px] leading-relaxed transition-all',
+              isMe && !msg.isDeleted ? 'cursor-pointer hover:scale-[0.98]' : '',
               isMe
                 ? msg.isDeleted
-                  ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none ml-auto'
-                  : 'bg-sky-400 text-white rounded-tr-none ml-auto'
-                : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none mr-auto',
+                  ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none'
+                  : 'bg-sky-400 text-white rounded-tr-none'
+                : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none',
             ].join(' ')}
           >
             {msg.type === 'image' && !msg.isDeleted ? (
@@ -65,20 +64,6 @@ const MessageBubble = memo(({
                   src={msg.imageUrl} alt="Çizim" loading="lazy"
                   className="rounded-xl w-full max-w-[200px] border-2 border-white/20 shadow-sm bg-white"
                 />
-                <a
-                  href={msg.imageUrl}
-                  download={`cizim-${msg.timestamp || Date.now()}.png`}
-                  title="İndir"
-                  onClick={e => e.stopPropagation()}
-                  className="absolute bottom-1 right-1 bg-black/50 hover:bg-black/70 text-white p-1.5 rounded-lg backdrop-blur-sm transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" x2="12" y1="15" y2="3" />
-                  </svg>
-                </a>
               </div>
             ) : (
               <div className="break-words">{msg.text}</div>
@@ -95,7 +80,7 @@ const MessageBubble = memo(({
 
           {/* Bağlam menüsü */}
           {activeMenuId === msg.id && (
-            <div className="mt-1.5 flex gap-2 justify-end mr-1 z-10">
+            <div className="mt-1.5 flex gap-2 justify-end mr-1 z-10 animate-in fade-in slide-in-from-top-1 duration-200">
               {msg.type !== 'image' && (
                 <button onClick={() => onEditClick(msg)}
                   className="text-xs font-medium bg-white text-slate-600 px-3 py-1.5 rounded-lg shadow-sm border border-slate-100 hover:bg-slate-50 transition-colors">
@@ -116,7 +101,7 @@ const MessageBubble = memo(({
 MessageBubble.displayName = 'MessageBubble';
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SHARED CHAT — Self-contained layout, VisualViewport klavye yönetimi
+//  SHARED CHAT
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SharedChat({ currentUser }) {
   const [messages,     setMessages]     = useState([]);
@@ -125,42 +110,15 @@ export default function SharedChat({ currentUser }) {
   const [editingId,    setEditingId]    = useState(null);
   const [editText,     setEditText]     = useState('');
 
-  // Layout ölçümleri — VisualViewport ile gerçek klavye yüksekliği
-  const [kbHeight, setKbHeight] = useState(0);  // klavye yüksekliği (px)
+  const messagesEndRef = useRef(null);
+  const messagesMapRef = useRef(new Map());
 
-  const messagesEndRef  = useRef(null);
-  const listRef         = useRef(null);
-  const messagesMapRef  = useRef(new Map());
+  // Auto-scroll logic
+  const scrollToBottom = (behavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
+  };
 
-  // ── VisualViewport: klavye yüksekliğini hesapla ────────────────────────────
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const onVVChange = () => {
-      // Klavye yüksekliği = layout height − visible height
-      const kb = window.innerHeight - vv.height;
-      setKbHeight(kb > 50 ? kb : 0);
-    };
-
-    vv.addEventListener('resize', onVVChange);
-    vv.addEventListener('scroll', onVVChange);
-    return () => {
-      vv.removeEventListener('resize', onVVChange);
-      vv.removeEventListener('scroll', onVVChange);
-    };
-  }, []);
-
-  // Klavye açılınca son mesaja otomatik kaydır
-  useEffect(() => {
-    if (kbHeight > 0) {
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }, 120);
-    }
-  }, [kbHeight]);
-
-  // ── Firebase ────────────────────────────────────────────────────────────────
+  // ── Firebase Listener ──────────────────────────────────────────────────────
   useEffect(() => {
     const chatRef = ref(rtdb, 'chat/messages');
 
@@ -171,7 +129,8 @@ export default function SharedChat({ currentUser }) {
       messagesMapRef.current.set(snapshot.key, msg);
       setMessages(prev => {
         if (prev.some(m => m.id === snapshot.key)) return prev;
-        return [...prev, msg].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        const next = [...prev, msg].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        return next;
       });
     });
 
@@ -186,9 +145,12 @@ export default function SharedChat({ currentUser }) {
     return () => { unsubAdded(); unsubChanged(); };
   }, []);
 
-  // Yeni mesaj gelince otomatik kaydır
+  // Yeni mesaj gelince veya sayfa açılınca scroll
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    scrollToBottom('auto');
+    // Animasyonlar bittikten sonra tekrar emin olalım
+    const timer = setTimeout(() => scrollToBottom('smooth'), 100);
+    return () => clearTimeout(timer);
   }, [messages.length]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
@@ -201,6 +163,7 @@ export default function SharedChat({ currentUser }) {
       timestamp: serverTimestamp(),
     });
     setText('');
+    setTimeout(() => scrollToBottom('smooth'), 50);
   }, [text, currentUser]);
 
   const handleDelete = useCallback((id) => {
@@ -221,91 +184,81 @@ export default function SharedChat({ currentUser }) {
   }, [editText]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
-  //
-  //  Yerleşim Modeli (klavye kapalı):
-  //  ┌──────────────────────────────────┐  ← App Header (flex-shrink-0, z-50)
-  //  │ Sohbetcan başlığı (sticky z-50)  │
-  //  ├──────────────────────────────────┤
-  //  │                                  │
-  //  │  Mesaj Listesi  (flex-1, scroll) │
-  //  │                                  │
-  //  ├──────────────────────────────────┤
-  //  │ Mesaj Yazma Kutusu               │  ← flex-shrink-0
-  //  ├──────────────────────────────────┤
-  //  │ Alt Menü (App.jsx'te)            │  ← App abs bottom
-  //  └──────────────────────────────────┘
-  //
-  //  Klavye açıkken: kbHeight px yukarı kayan bottom bar (App.jsx kbOffset)
-  //  Mesaj listesi: kalan tüm boşluğu doldurur (flex-1)
-  //
   return (
-    <div className="flex flex-col w-full h-full overflow-hidden bg-white">
-
-      {/* ── 1. Sohbetcan başlığı ── */}
-      <div className="flex-shrink-0 z-50 sticky top-0 bg-white/95 backdrop-blur-sm px-3 pt-2 pb-1.5 border-b border-slate-50">
-        <div className="bg-slate-50/80 backdrop-blur-sm rounded-2xl border border-slate-100 px-4 py-2 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-base">💬</span>
-            <h2 className="font-bold text-slate-600 text-sm tracking-wide">Sohbetcan</h2>
+    <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
+      
+      {/* ── 1. Başlık (Sohbetcan) ── */}
+      <div className="flex-shrink-0 z-10 bg-white/95 backdrop-blur-sm sticky top-0 border-b border-slate-100">
+        <div className="px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">💬</span>
+            <div className="flex flex-col">
+              <h2 className="font-bold text-slate-700 text-[14px] leading-tight tracking-tight">Sohbetcan</h2>
+              <span className="text-[10px] text-slate-400 font-medium">Harika anılar biriktirin🧡</span>
+            </div>
           </div>
-          <span className="text-base text-slate-400 opacity-50">🧡</span>
+          <div className="flex -space-x-2">
+            <div className="w-7 h-7 rounded-full bg-sky-100 border-2 border-white flex items-center justify-center text-[10px] font-bold text-sky-600">Z</div>
+            <div className="w-7 h-7 rounded-full bg-pink-100 border-2 border-white flex items-center justify-center text-[10px] font-bold text-pink-600">A</div>
+          </div>
         </div>
       </div>
 
-      {/* ── 2. Mesaj listesi ── */}
-      <div
-        ref={listRef}
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-4"
-      >
-        {messages.length === 0 && (
-          <div className="h-full flex items-center justify-center text-slate-300 font-medium italic text-sm">
-            Henüz kimse bir şey yazmamış...
+      {/* ── 2. Mesaj Listesi Alanı ── */}
+      <div className="flex-1 overflow-y-auto flex flex-col p-4 space-y-3 overscroll-contain">
+        {/* Kritk İtici: Mesajlar azken en alttan başlamasını sağlar */}
+        <div className="flex-1 min-h-[20px]"></div>
+
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center opacity-40 grayscale">
+            <span className="text-4xl mb-2">🎈</span>
+            <p className="text-xs font-medium text-slate-500">Henüz mesaj yok.<br/>İlk selamı sen ver!</p>
           </div>
+        ) : (
+          messages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              currentUser={currentUser}
+              activeMenuId={activeMenuId}
+              setActiveMenuId={setActiveMenuId}
+              onEditClick={handleEditClick}
+              onDelete={handleDelete}
+              editingId={editingId}
+              editText={editText}
+              setEditText={setEditText}
+              onSaveEdit={handleSaveEdit}
+              setEditingId={setEditingId}
+            />
+          ))
         )}
 
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            msg={msg}
-            currentUser={currentUser}
-            activeMenuId={activeMenuId}
-            setActiveMenuId={setActiveMenuId}
-            onEditClick={handleEditClick}
-            onDelete={handleDelete}
-            editingId={editingId}
-            editText={editText}
-            setEditText={setEditText}
-            onSaveEdit={handleSaveEdit}
-            setEditingId={setEditingId}
-          />
-        ))}
-
-        {/* Scroll anchor — en alta kaydırmak için */}
-        <div ref={messagesEndRef} />
+        {/* Otomatik Scroll Anchor */}
+        <div ref={messagesEndRef} className="h-0 w-0" />
       </div>
 
-      {/* ── 3. Mesaj yazma kutusu ── */}
-      <div className="flex-shrink-0 z-50 bg-white border-t border-slate-100">
-        <form onSubmit={handleSend} className="px-3 py-3">
-          {/* Modern Pill — input + buton tek kapsayıcı içinde */}
-          <div className="flex items-center bg-slate-50/80 rounded-full border border-slate-200 shadow-inner px-1 py-1 gap-2">
+      {/* ── 3. Yazma Kutusu (Input Area) ── */}
+      <div className="flex-shrink-0 bg-white border-t border-slate-200 p-3 pb-[80px]">
+        <form onSubmit={handleSend} className="max-w-[500px] mx-auto">
+          <div className="flex items-center bg-slate-100/80 rounded-[24px] border border-slate-200/50 shadow-inner px-1.5 py-1.5 gap-2 group transition-all focus-within:bg-white focus-within:border-sky-300 focus-within:ring-2 focus-within:ring-sky-100/50">
             <input
               type="text"
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="Mesajınızı buraya yazın..."
-              className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-3 text-slate-700 text-[16px] font-medium min-w-0 placeholder:text-slate-400"
+              placeholder="Bir şeyler yazın..."
+              className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-4 text-slate-700 text-[16px] font-medium min-w-0 placeholder:text-slate-400"
             />
             <button
               type="submit"
               disabled={!text.trim()}
-              className="bg-sky-500 hover:bg-sky-600 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 text-white w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-md"
+              className="bg-sky-500 hover:bg-sky-600 active:scale-95 disabled:bg-slate-300 disabled:shadow-none text-white w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-[0_2px_8px_rgba(14,165,233,0.3)]"
             >
               <Send size={18} className="translate-x-0.5" />
             </button>
           </div>
         </form>
       </div>
+
     </div>
   );
 }
