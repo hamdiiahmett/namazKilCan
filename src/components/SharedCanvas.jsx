@@ -143,7 +143,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const [brushSize, setBrushSize] = useState(4);
   const [history, setHistory] = useState([]); // [{id, snapshot}]
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [recentColors, setRecentColors] = useState(['#fb7185', '#38bdf8', '#34d399', '#fbbf24']);
+  const [recentColors, setRecentColors] = useState(['#e2e8f0', '#e2e8f0', '#e2e8f0', '#e2e8f0']);
   const [activeSlotIndex, setActiveSlotIndex] = useState(0);
 
   const colorRef = useRef(color);
@@ -391,23 +391,26 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     });
   }, [currentUser]);
 
+  // ── Renk Yönetimi ──────────────────────────────────────────────────────────
   const handleColorPick = useCallback((newColor) => {
     setColor(newColor);
     setIsEraser(false);
     setIsFill(false);
     
+    // Sadece seçili slotun rengini güncelle (diziyi bozmadan)
     setRecentColors(prev => {
-      const next = [...prev];
-      next[activeSlotIndex] = newColor;
-      return next;
+      const nextArr = [...prev];
+      nextArr[activeSlotIndex] = newColor;
+      return nextArr;
     });
   }, [activeSlotIndex]);
 
   const handleSlotClick = useCallback((index) => {
     setActiveSlotIndex(index);
-    const slotColor = recentColors[index];
-    if (slotColor && slotColor !== '#ffffff' && slotColor !== 'transparent') {
-      setColor(slotColor);
+    const chosenColor = recentColors[index];
+    // Eğer slotta bir renk varsa (varsayılan gri değilse) fırçayı o renge ayarla
+    if (chosenColor && chosenColor !== '#e2e8f0' && chosenColor !== 'transparent') {
+      setColor(chosenColor);
       setIsEraser(false);
       setIsFill(false);
     }
@@ -448,14 +451,14 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             <div className="flex gap-1.5 items-center px-1.5 py-1 bg-slate-50/50 rounded-full border border-slate-100">
               {recentColors.map((c, i) => (
                 <button
-                  key={`${c}-${i}`}
+                  key={`slot-${i}`}
                   onClick={() => handleSlotClick(i)}
-                  className={`w-6 h-6 rounded-full transition-all duration-200 shadow-sm border ${
+                  className={`w-6 h-6 rounded-full transition-all duration-150 shadow-sm border ${
                     activeSlotIndex === i 
-                      ? 'scale-125 ring-2 ring-offset-1 ring-sky-400 border-white z-10' 
-                      : 'border-slate-100/50 hover:scale-110 opacity-80'
+                      ? 'scale-125 ring-2 ring-offset-2 ring-sky-500 border-white z-10' 
+                      : 'border-slate-200 hover:scale-110 opacity-70'
                   }`}
-                  style={{ backgroundColor: c }}
+                  style={{ backgroundColor: recentColors[i] }}
                 />
               ))}
             </div>
