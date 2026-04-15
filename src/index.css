@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+/* 🚀 Viewport & Keyboard Bounce Fix */
+html, body {
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden !important;
+  position: fixed;
+  width: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+}
