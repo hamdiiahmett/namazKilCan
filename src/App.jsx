@@ -13,6 +13,7 @@ function App() {
   });
   const [activeTab, setActiveTab] = useState('home');
   const [kbOffset, setKbOffset] = useState(0);
+  const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('currentUser', currentUser);
@@ -63,18 +64,23 @@ function App() {
             {activeTab === 'home' && <Home currentUser={currentUser} />}
             {activeTab === 'namaz' && <PrayerTracker />}
             {activeTab === 'chat' && <SharedChat currentUser={currentUser} />}
-            {activeTab === 'canvas' && <div className="px-2 sm:px-4"><SharedCanvas currentUser={currentUser} /></div>}
+            {activeTab === 'canvas' && (
+              <div className="px-2 sm:px-4">
+                <SharedCanvas currentUser={currentUser} onFullscreenChange={setIsCanvasFullscreen} />
+              </div>
+            )}
           </Suspense>
         </div>
       </main>
 
       {/* Alt Menü Tab Bar */}
-      <div
-        className="absolute left-0 right-0 z-[9999] flex flex-col justify-end w-full max-w-[500px] mx-auto pointer-events-none"
-        style={{ bottom: `${kbOffset}px` }}
-      >
-        <div className="pointer-events-auto flex-shrink-0 bg-white/95 backdrop-blur-md border-t border-slate-100 flex justify-around items-center px-2 sm:px-6 py-2 pb-[max(8px,env(safe-area-inset-bottom))] w-full shadow-[0_-1px_10px_rgba(0,0,0,0.05)]">
-          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'home' ? 'text-amber-500 scale-110' : 'text-slate-400'}`}>
+      {(!isCanvasFullscreen || activeTab !== 'canvas') && (
+        <div
+          className="absolute left-0 right-0 z-[9999] flex flex-col justify-end w-full max-w-[500px] mx-auto pointer-events-none"
+          style={{ bottom: `${kbOffset}px` }}
+        >
+          <div className="pointer-events-auto flex-shrink-0 bg-white/95 backdrop-blur-md border-t border-slate-100 flex justify-around items-center px-2 sm:px-6 py-2 pb-[max(8px,env(safe-area-inset-bottom))] w-full shadow-[0_-1px_10px_rgba(0,0,0,0.05)]">
+            <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-0.5 min-w-[56px] py-1 transition-all duration-200 ${activeTab === 'home' ? 'text-amber-500 scale-110' : 'text-slate-400'}`}>
             <span className="text-2xl">🏠</span>
             <span className="text-[10px] font-bold tracking-wide">Ana</span>
           </button>
@@ -92,6 +98,7 @@ function App() {
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -56,7 +56,7 @@ function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
 //  MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
+const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChange }) {
   // --- REFS ---
   const canvasRef      = useRef(null);
   const offscreenRef   = useRef(null);
@@ -75,8 +75,12 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const [tool, setTool]             = useState('pencil');
   const [brushSize, setBrushSize]   = useState(10);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isToolbarOpen, setIsToolbarOpen] = useState(true);
   const [redoStack, setRedoStack]   = useState([]);
   const [allSegments, setAllSegments] = useState([]);
+
+  const segmentsRef = useRef([]);
+  useEffect(() => { segmentsRef.current = allSegments; }, [allSegments]);
 
   const currentColor = slots[activeSlot] || '#000000';
 
@@ -230,7 +234,29 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   //  FULLSCREEN (CSS-only, works on iOS)
   // ─────────────────────────────────────────────────────────────────────────
 
-  const toggleFullscreen = () => setIsFullscreen(f => !f);
+  const toggleFullscreen = () => {
+    setIsFullscreen(f => {
+      const next = !f;
+      if (onFullscreenChange) onFullscreenChange(next);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const targetW = canvas.offsetWidth * 2;
+      const targetH = canvas.offsetHeight * 2;
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+        contextRef.current = canvas.getContext('2d', { willReadFrequently: true });
+        redrawAll(segmentsRef.current);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [isFullscreen, redrawAll]);
 
   // ─────────────────────────────────────────────────────────────────────────
   //  UNDO / REDO
@@ -390,10 +416,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 w-full h-[100dvh] z-[9999] bg-white pt-10' : 'relative'}`}>
+    <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-[9999] bg-white overflow-hidden' : 'relative'}`}>
 
       {/* ── Header ── */}
-      <div className={`w-full max-w-4xl flex justify-between items-center mb-4 px-4 h-16 bg-white/50 backdrop-blur-sm rounded-3xl transition-all ${isFullscreen ? 'fixed top-4 left-4 right-4 z-[100000] max-w-none shadow-sm border border-slate-100' : ''}`}>
+      <div className={`w-full max-w-4xl flex justify-between items-center bg-white/50 backdrop-blur-sm rounded-3xl transition-all z-[10000] ${isFullscreen ? 'absolute top-4 left-4 right-4 h-16 px-4 shadow-sm border border-slate-100 max-w-none w-auto' : 'mb-4 px-4 h-16 relative'}`}>
         <div className="flex items-center gap-3">
           <span className="text-2xl">🎨</span>
           <span className="text-lg font-bold text-slate-700 tracking-tight">Çizim Alanı</span>
@@ -444,7 +470,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       </div>
 
       {/* ── Canvas ── */}
-      <div className={`relative w-full max-w-4xl bg-white rounded-[2rem] sm:rounded-[2.5rem] p-3 sm:p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all ${isFullscreen ? 'flex-1 w-full max-w-none mb-24' : 'aspect-[4/3] sm:aspect-video'}`}>
+      <div 
+        className={`w-full max-w-4xl bg-white rounded-[2rem] sm:rounded-[2.5rem] p-3 sm:p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all duration-300 ${isFullscreen ? 'absolute top-24 left-4 right-4 max-w-none w-auto' : 'relative aspect-[4/3] sm:aspect-video'}`}
+        style={isFullscreen ? { bottom: isToolbarOpen ? '14.5rem' : '5rem' } : {}}
+      >
         <canvas
           ref={canvasRef}
           onMouseDown={startDrawing}
@@ -453,62 +482,75 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
-          className="w-full h-full block cursor-crosshair rounded-[2rem]"
+          className="w-full h-full block cursor-crosshair rounded-[1rem] sm:rounded-[1.5rem]"
           style={{ touchAction: 'none' }}
         />
       </div>
 
       {/* ── Toolbar ── */}
-      <div className={`mt-4 sm:mt-8 w-full max-w-md flex flex-col gap-3 sm:gap-5 p-4 sm:p-6 bg-white rounded-[2rem] sm:rounded-[3rem] shadow-toolbar border border-slate-50 ${isFullscreen ? 'fixed bottom-4 sm:bottom-8 z-[100000]' : ''}`}>
+      <div className={`w-full max-w-md flex flex-col items-center bg-white rounded-[2rem] sm:rounded-[3rem] shadow-toolbar border border-slate-50 transition-all duration-300 z-[10000] ${isFullscreen ? 'absolute bottom-4 left-4 right-4 mx-auto w-auto' : 'mt-4 sm:mt-8 relative'}`}>
+        
+        {/* Toggle Button */}
+        <button 
+          onClick={() => setIsToolbarOpen(!isToolbarOpen)}
+          className="w-full h-8 flex items-center justify-center hover:bg-slate-50/50 rounded-t-[2rem] sm:rounded-t-[3rem] transition-colors group cursor-pointer"
+          title={isToolbarOpen ? "Araçları Gizle" : "Araçları Göster"}
+        >
+          <div className={`w-12 h-1.5 bg-slate-200 group-hover:bg-slate-300 rounded-full transition-transform duration-300 ${isToolbarOpen ? '' : 'translate-y-0.5'}`} />
+        </button>
 
-        {/* Row 1: Main colors + wheel */}
-        <div className="flex items-center justify-center gap-3">
-          {mainColors.map(c => (
-            <button key={c} onClick={() => handlePaletteClick(c)}
-              className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all border-4 ${currentColor === c ? 'border-indigo-400 scale-110 shadow-lg' : 'border-white hover:scale-105'}`}
-              style={{ backgroundColor: c }} />
-          ))}
-          <div className="w-px h-6 bg-slate-100 mx-1" />
-          <div className="relative w-10 h-10 rounded-full overflow-hidden border-4 border-white shadow-sm hover:scale-110 transition-all ring-2 ring-slate-100"
-            style={{ background: 'conic-gradient(from 180deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)' }}>
-            <input type="color" value={currentColor} onChange={e => handleWheelChange(e.target.value)}
-              className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0" />
-          </div>
-        </div>
+        <div className={`w-full flex justify-center transition-all duration-300 overflow-hidden ${isToolbarOpen ? 'max-h-[30rem] opacity-100 pb-4 sm:pb-6' : 'max-h-0 opacity-0 pb-0'}`}>
+          <div className="flex flex-col gap-3 sm:gap-5 px-4 sm:px-6 w-full items-center">
+            {/* Row 1: Main colors + wheel */}
+            <div className="flex items-center justify-center gap-3">
+              {mainColors.map(c => (
+                <button key={c} onClick={() => handlePaletteClick(c)}
+                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all border-4 ${currentColor === c ? 'border-indigo-400 scale-110 shadow-lg' : 'border-white hover:scale-105'}`}
+                  style={{ backgroundColor: c }} />
+              ))}
+              <div className="w-px h-6 bg-slate-100 mx-1" />
+              <div className="relative w-10 h-10 rounded-full overflow-hidden border-4 border-white shadow-sm hover:scale-110 transition-all ring-2 ring-slate-100"
+                style={{ background: 'conic-gradient(from 180deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)' }}>
+                <input type="color" value={currentColor} onChange={e => handleWheelChange(e.target.value)}
+                  className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0" />
+              </div>
+            </div>
 
-        {/* Row 2: Slots + tools */}
-        <div className="flex items-center justify-center gap-5">
-          <div className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 rounded-2xl">
-            {slots.map((c, i) => (
-              <button key={i} onClick={() => setActiveSlot(i)}
-                className={`w-8 h-8 rounded-full transition-all border-4 ${activeSlot === i ? 'border-indigo-400 scale-125 shadow-md z-10' : 'border-white opacity-40 hover:opacity-100'}`}
-                style={{ backgroundColor: c }} />
-            ))}
-          </div>
-          <div className="w-px h-8 bg-slate-200" />
-          <div className="flex items-center gap-3">
-            <button onClick={() => setTool('fill')}
-              className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'fill' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-              title="Boya Kovası">
-              <span className="text-2xl">🪣</span>
-            </button>
-            <button onClick={() => setTool('eraser')}
-              className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-              title="Silgi">
-              <span className="text-2xl">🧼</span>
-            </button>
-          </div>
-        </div>
+            {/* Row 2: Slots + tools */}
+            <div className="flex items-center justify-center gap-5">
+              <div className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 rounded-2xl">
+                {slots.map((c, i) => (
+                  <button key={i} onClick={() => setActiveSlot(i)}
+                    className={`w-8 h-8 rounded-full transition-all border-4 ${activeSlot === i ? 'border-indigo-400 scale-125 shadow-md z-10' : 'border-white opacity-40 hover:opacity-100'}`}
+                    style={{ backgroundColor: c }} />
+                ))}
+              </div>
+              <div className="w-px h-8 bg-slate-200" />
+              <div className="flex items-center gap-3">
+                <button onClick={() => setTool('fill')}
+                  className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'fill' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                  title="Boya Kovası">
+                  <span className="text-2xl">🪣</span>
+                </button>
+                <button onClick={() => setTool('eraser')}
+                  className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                  title="Silgi">
+                  <span className="text-2xl">🧼</span>
+                </button>
+              </div>
+            </div>
 
-        {/* Row 3: Brush size slider */}
-        <div className="flex items-center gap-4 bg-slate-50/30 p-3 rounded-2xl">
-          <div className="w-8 h-8 flex items-center justify-center">
-            <div style={{ width: Math.max(2, brushSize / 2), height: Math.max(2, brushSize / 2), backgroundColor: currentColor, borderRadius: '50%' }} className="transition-all" />
+            {/* Row 3: Brush size slider */}
+            <div className="flex items-center gap-4 bg-slate-50/30 p-3 rounded-2xl w-full">
+              <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
+                <div style={{ width: Math.max(2, brushSize / 2), height: Math.max(2, brushSize / 2), backgroundColor: currentColor, borderRadius: '50%' }} className="transition-all" />
+              </div>
+              <input type="range" min="1" max="50" value={brushSize}
+                onChange={e => setBrushSize(Number(e.target.value))}
+                className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-pink-400" />
+              <span className="text-[10px] font-bold text-slate-400 w-8 flex-shrink-0">{brushSize}px</span>
+            </div>
           </div>
-          <input type="range" min="1" max="50" value={brushSize}
-            onChange={e => setBrushSize(Number(e.target.value))}
-            className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-pink-400" />
-          <span className="text-[10px] font-bold text-slate-400 w-8">{brushSize}px</span>
         </div>
       </div>
 
