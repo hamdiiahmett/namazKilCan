@@ -59,7 +59,7 @@ function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
 const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- REFS ---
   const canvasRef = useRef(null);
-  const offscreenRef = useRef(null); // Used for layered composition
+  const offscreenRef = useRef(null); 
   const contextRef = useRef(null);
   const pointsRef = useRef([]);
   const isDrawingRef = useRef(false);
@@ -83,7 +83,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- DERIVED ---
   const currentColor = slots[activeSlot] || '#000000';
 
-  // --- LAYERED REDRAW LOGIC ---
+  // --- PÜRÜZSÜZLEŞTİRME (SMOOTHING) LOGIC ---
 
   const drawSegment = useCallback((ctx, canvas, data) => {
     if (data.type === 'fill') {
@@ -102,14 +102,14 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             ctx.strokeStyle = data.color;
         }
         ctx.beginPath();
-        if (!data.p3) {
-          ctx.moveTo(data.p1.x, data.p1.y);
-          ctx.lineTo(data.p2.x, data.p2.y);
+        if (data.curve) {
+            // Quadratic Bezier Smoothing
+            ctx.moveTo(data.start.x, data.start.y);
+            ctx.quadraticCurveTo(data.control.x, data.control.y, data.end.x, data.end.y);
         } else {
-          const midX = (data.p2.x + data.p3.x) / 2;
-          const midY = (data.p2.y + data.p3.y) / 2;
-          ctx.moveTo(data.p1.x, data.p1.y);
-          ctx.quadraticCurveTo(data.p2.x, data.p2.y, midX, midY);
+            // Simple Line
+            ctx.moveTo(data.p1.x, data.p1.y);
+            ctx.lineTo(data.p2.x, data.p2.y);
         }
         ctx.stroke();
     }
@@ -120,12 +120,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     
-    // 1. Prepare Main Canvas (Background)
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 2. Prepare Offscreen Canvas
     if (!offscreenRef.current) {
         offscreenRef.current = document.createElement('canvas');
     }
@@ -134,7 +132,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     offscreen.height = canvas.height;
     const octx = offscreen.getContext('2d', { willReadFrequently: true });
 
-    // 3. Group by Sender
     const grouped = segments.reduce((acc, seg) => {
         const uid = seg.senderId || 'Anonim';
         if (!acc[uid]) acc[uid] = [];
@@ -142,7 +139,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         return acc;
     }, {});
 
-    // 4. Render Layers (Order: Others, then Me)
     const userIds = Object.keys(grouped);
     const sortedIds = [
         ...userIds.filter(id => id !== currentUser),
@@ -153,12 +149,9 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         octx.clearRect(0, 0, offscreen.width, offscreen.height);
         octx.globalCompositeOperation = 'source-over';
         grouped[uid].forEach(seg => {
-            if (seg.type === 'clear') {
-                return; // Handled globally
-            }
+            if (seg.type === 'clear') return;
             drawSegment(octx, offscreen, seg);
         });
-        // Composite user's layer onto main canvas
         ctx.globalCompositeOperation = 'source-over';
         ctx.drawImage(offscreen, 0, 0);
     });
@@ -179,7 +172,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       if (data) {
         Object.keys(data).sort().forEach(key => {
             if (data[key].type === 'clear') {
-                segmentsArray.length = 0; // Clear everything before
+                segmentsArray.length = 0;
             } else {
                 segmentsArray.push({ ...data[key], key });
             }
@@ -195,7 +188,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- ACTIONS ---
 
   const handleUndo = async () => {
-    // Find my last stroke
     const myStrokes = allSegments.filter(s => (s.senderId || 'Anonim') === currentUser);
     if (myStrokes.length === 0) return;
     
@@ -266,7 +258,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     });
   };
 
-  const drawLocal = (p1, p2, p3, isSync = true) => {
+  const drawLocalCurve = (start, control, end, isSync = true) => {
     const ctx = contextRef.current;
     if (!ctx) return;
     
@@ -280,20 +272,39 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = currentColor;
     }
+    
     ctx.beginPath();
-    if (!p3) {
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-    } else {
-      const midX = (p2.x + p3.x) / 2;
-      const midY = (p2.y + p3.y) / 2;
-      ctx.moveTo(p1.x, p1.y);
-      ctx.quadraticCurveTo(p2.x, p2.y, midX, midY);
-    }
+    ctx.moveTo(start.x, start.y);
+    ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
     ctx.stroke();
 
     if (isSync) {
-      syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, p1, p2, p3 });
+      syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, curve: true, start, control, end });
+    }
+  };
+
+  const drawLocalLine = (p1, p2, isSync = true) => {
+    const ctx = contextRef.current;
+    if (!ctx) return;
+    
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (tool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = brushSize * 4;
+    } else {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = currentColor;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+
+    if (isSync) {
+        syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, curve: false, p1, p2 });
     }
   };
 
@@ -318,15 +329,31 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     if (!isDrawingRef.current) return;
     const coords = getCoordinates(e);
     if (!coords) return;
+    
     const pts = pointsRef.current;
     pts.push(coords);
-    if (pts.length === 2) {
-      drawLocal(pts[0], pts[1], null);
-    } else if (pts.length > 2) {
-      const p1 = pts[pts.length - 3];
-      const p2 = pts[pts.length - 2];
-      const p3 = pts[pts.length - 1];
-      drawLocal(p1, p2, p3);
+    
+    const len = pts.length;
+    if (len === 2) {
+      // First tiny segment - just a line
+      drawLocalLine(pts[0], pts[1]);
+    } else if (len >= 3) {
+      // Smoothing: Midpoint logic
+      const pPrev = pts[len - 3];
+      const pCurr = pts[len - 2];
+      const pNext = pts[len - 1];
+      
+      const start = {
+        x: (pPrev.x + pCurr.x) / 2,
+        y: (pPrev.y + pCurr.y) / 2
+      };
+      const control = pCurr;
+      const end = {
+        x: (pCurr.x + pNext.x) / 2,
+        y: (pCurr.y + pNext.y) / 2
+      };
+      
+      drawLocalCurve(start, control, end);
     }
   };
 
