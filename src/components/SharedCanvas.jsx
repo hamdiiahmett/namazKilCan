@@ -243,20 +243,28 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const targetW = canvas.offsetWidth * 2;
-      const targetH = canvas.offsetHeight * 2;
-      if (canvas.width !== targetW || canvas.height !== targetH) {
-        canvas.width = targetW;
-        canvas.height = targetH;
-        contextRef.current = canvas.getContext('2d', { willReadFrequently: true });
-        redrawAll(segmentsRef.current);
-      }
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [isFullscreen, redrawAll]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let resizeTimer;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const targetW = canvas.offsetWidth * 2;
+        const targetH = canvas.offsetHeight * 2;
+        if ((canvas.width !== targetW || canvas.height !== targetH) && targetW > 0 && targetH > 0) {
+          canvas.width = targetW;
+          canvas.height = targetH;
+          contextRef.current = canvas.getContext('2d', { willReadFrequently: true });
+          redrawAll(segmentsRef.current);
+        }
+      }, 200);
+    });
+    observer.observe(canvas);
+    return () => {
+      observer.disconnect();
+      clearTimeout(resizeTimer);
+    };
+  }, [redrawAll]);
 
   // ─────────────────────────────────────────────────────────────────────────
   //  UNDO / REDO
@@ -416,10 +424,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-[9999] bg-white overflow-hidden' : 'relative'}`}>
+    <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-[9999] bg-white pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] px-4 sm:px-6 overflow-hidden' : 'relative'}`}>
 
       {/* ── Header ── */}
-      <div className={`w-full max-w-4xl flex justify-between items-center bg-white/50 backdrop-blur-sm rounded-3xl transition-all z-[10000] ${isFullscreen ? 'absolute top-4 left-4 right-4 h-16 px-4 shadow-sm border border-slate-100 max-w-none w-auto' : 'mb-4 px-4 h-16 relative'}`}>
+      <div className={`w-full max-w-4xl flex justify-between items-center bg-white/50 backdrop-blur-sm rounded-3xl transition-all z-[10000] flex-shrink-0 ${isFullscreen ? 'h-16 px-4 shadow-sm border border-slate-100' : 'mb-4 px-4 h-16 relative'}`}>
         <div className="flex items-center gap-3">
           <span className="text-2xl">🎨</span>
           <span className="text-lg font-bold text-slate-700 tracking-tight">Çizim Alanı</span>
@@ -471,24 +479,25 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
 
       {/* ── Canvas ── */}
       <div 
-        className={`w-full max-w-4xl bg-white rounded-[2rem] sm:rounded-[2.5rem] p-3 sm:p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all duration-300 ${isFullscreen ? 'absolute top-24 left-4 right-4 max-w-none w-auto' : 'relative aspect-[4/3] sm:aspect-video'}`}
-        style={isFullscreen ? { bottom: isToolbarOpen ? '14.5rem' : '5rem' } : {}}
+        className={`w-full max-w-4xl bg-white rounded-[2rem] sm:rounded-[2.5rem] p-3 sm:p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all duration-300 flex flex-col ${isFullscreen ? 'flex-1 min-h-0 my-4' : 'relative aspect-[4/3] sm:aspect-video'}`}
       >
-        <canvas
-          ref={canvasRef}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={stopDrawing}
-          className="w-full h-full block cursor-crosshair rounded-[1rem] sm:rounded-[1.5rem]"
-          style={{ touchAction: 'none' }}
-        />
+        <div className="flex-1 w-full relative min-h-0">
+          <canvas
+            ref={canvasRef}
+            onMouseDown={startDrawing}
+            onMouseMove={draw}
+            onMouseUp={stopDrawing}
+            onTouchStart={startDrawing}
+            onTouchMove={draw}
+            onTouchEnd={stopDrawing}
+            className="absolute inset-0 w-full h-full cursor-crosshair rounded-[1rem] sm:rounded-[1.5rem]"
+            style={{ touchAction: 'none' }}
+          />
+        </div>
       </div>
 
       {/* ── Toolbar ── */}
-      <div className={`w-full max-w-md flex flex-col items-center bg-white rounded-[2rem] sm:rounded-[3rem] shadow-toolbar border border-slate-50 transition-all duration-300 z-[10000] ${isFullscreen ? 'absolute bottom-4 left-4 right-4 mx-auto w-auto' : 'mt-4 sm:mt-8 relative'}`}>
+      <div className={`w-full max-w-md flex flex-col items-center bg-white rounded-[2rem] sm:rounded-[3rem] shadow-toolbar border border-slate-50 transition-all duration-300 z-[10000] flex-shrink-0 ${isFullscreen ? 'mb-2' : 'mt-4 sm:mt-8 relative'}`}>
         
         {/* Toggle Button */}
         <button 
