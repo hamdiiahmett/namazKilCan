@@ -1,17 +1,23 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
-import { createPortal } from 'react-dom';
 import { rtdb } from '../firebase';
 import { ref, onChildAdded, onChildChanged, push, serverTimestamp, update } from 'firebase/database';
 import { Send } from 'lucide-react';
 import { format } from 'date-fns';
 
-// Mesaj balonunu ayrı component olarak memoize et — sadece kendi değişince re-render olur
-const MessageBubble = memo(({ msg, currentUser, activeMenuId, setActiveMenuId, onEditClick, onDelete, editingId, editText, setEditText, onSaveEdit, setEditingId }) => {
+// ── Mesaj balonu ────────────────────────────────────────────────────────────────
+const MessageBubble = memo(({
+  msg, currentUser,
+  activeMenuId, setActiveMenuId,
+  onEditClick, onDelete,
+  editingId, editText, setEditText, onSaveEdit, setEditingId,
+}) => {
   const isMe = msg.senderId === currentUser;
-  const timeString = msg.timestamp ? format(new Date(msg.timestamp), 'HH:mm') : '';
+  const timeStr = msg.timestamp ? format(new Date(msg.timestamp), 'HH:mm') : '';
 
   return (
     <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+
+      {/* ── Düzenleme modu ── */}
       {editingId === msg.id ? (
         <div className="w-full max-w-[92%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
           <input
@@ -36,6 +42,7 @@ const MessageBubble = memo(({ msg, currentUser, activeMenuId, setActiveMenuId, o
           </div>
         </div>
       ) : (
+        /* ── Normal mesaj ── */
         <div className={`flex flex-col w-full ${isMe ? 'items-end' : 'items-start'}`}>
           <div
             onClick={() => {
@@ -49,14 +56,13 @@ const MessageBubble = memo(({ msg, currentUser, activeMenuId, setActiveMenuId, o
                 ? msg.isDeleted
                   ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none ml-auto'
                   : 'bg-sky-400 text-white rounded-tr-none ml-auto'
-                : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none mr-auto'
+                : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none mr-auto',
             ].join(' ')}
           >
             {msg.type === 'image' && !msg.isDeleted ? (
               <div className="mt-1 mb-1 relative">
                 <img
-                  src={msg.imageUrl} alt="Çizim"
-                  loading="lazy"
+                  src={msg.imageUrl} alt="Çizim" loading="lazy"
                   className="rounded-xl w-full max-w-[200px] border-2 border-white/20 shadow-sm bg-white"
                 />
                 <a
@@ -83,10 +89,11 @@ const MessageBubble = memo(({ msg, currentUser, activeMenuId, setActiveMenuId, o
               {msg.isEdited && !msg.isDeleted && (
                 <span className="opacity-80 font-medium">(düzenlendi)</span>
               )}
-              <span>{timeString}</span>
+              <span>{timeStr}</span>
             </div>
           </div>
 
+          {/* Bağlam menüsü */}
           {activeMenuId === msg.id && (
             <div className="mt-1.5 flex gap-2 justify-end mr-1 z-10">
               {msg.type !== 'image' && (
@@ -108,47 +115,66 @@ const MessageBubble = memo(({ msg, currentUser, activeMenuId, setActiveMenuId, o
 });
 MessageBubble.displayName = 'MessageBubble';
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  SHARED CHAT — Self-contained layout, VisualViewport klavye yönetimi
+// ══════════════════════════════════════════════════════════════════════════════
 export default function SharedChat({ currentUser }) {
-  const [messages, setMessages] = useState([]);
-  const [text, setText] = useState('');
-  const messagesEndRef = useRef(null);
-
+  const [messages,     setMessages]     = useState([]);
+  const [text,         setText]         = useState('');
   const [activeMenuId, setActiveMenuId] = useState(null);
-  const [editingId, setEditingId] = useState(null);
-  const [editText, setEditText] = useState('');
+  const [editingId,    setEditingId]    = useState(null);
+  const [editText,     setEditText]     = useState('');
 
-  const [portalRoot, setPortalRoot] = useState(null);
+  // Layout ölçümleri — VisualViewport ile gerçek klavye yüksekliği
+  const [kbHeight, setKbHeight] = useState(0);  // klavye yüksekliği (px)
 
-  // Mesajları map olarak tut — O(1) lookup ile güncelleme
-  const messagesMapRef = useRef(new Map());
+  const messagesEndRef  = useRef(null);
+  const listRef         = useRef(null);
+  const messagesMapRef  = useRef(new Map());
 
+  // ── VisualViewport: klavye yüksekliğini hesapla ────────────────────────────
   useEffect(() => {
-    setPortalRoot(document.getElementById('chat-input-portal'));
+    const vv = window.visualViewport;
+    if (!vv) return;
 
-    const handler = () => {
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
+    const onVVChange = () => {
+      // Klavye yüksekliği = layout height − visible height
+      const kb = window.innerHeight - vv.height;
+      setKbHeight(kb > 50 ? kb : 0);
     };
-    window.visualViewport?.addEventListener('resize', handler);
-    return () => window.visualViewport?.removeEventListener('resize', handler);
+
+    vv.addEventListener('resize', onVVChange);
+    vv.addEventListener('scroll', onVVChange);
+    return () => {
+      vv.removeEventListener('resize', onVVChange);
+      vv.removeEventListener('scroll', onVVChange);
+    };
   }, []);
 
+  // Klavye açılınca son mesaja otomatik kaydır
+  useEffect(() => {
+    if (kbHeight > 0) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, 120);
+    }
+  }, [kbHeight]);
+
+  // ── Firebase ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const chatRef = ref(rtdb, 'chat/messages');
 
-    // onChildAdded: sadece yeni gelen mesajı işle, tüm listeyi yeniden çekme
     const unsubAdded = onChildAdded(chatRef, (snapshot) => {
       const val = snapshot.val();
       if (!val) return;
       const msg = { id: snapshot.key, ...val };
       messagesMapRef.current.set(snapshot.key, msg);
       setMessages(prev => {
-        // Zaten varsa ekleme (duplicate engellemek için)
         if (prev.some(m => m.id === snapshot.key)) return prev;
         return [...prev, msg].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       });
     });
 
-    // onChildChanged: sadece değişen mesajı güncelle (düzenle/sil)
     const unsubChanged = onChildChanged(chatRef, (snapshot) => {
       const val = snapshot.val();
       if (!val) return;
@@ -157,24 +183,22 @@ export default function SharedChat({ currentUser }) {
       setMessages(prev => prev.map(m => m.id === snapshot.key ? updated : m));
     });
 
-    return () => {
-      unsubAdded();
-      unsubChanged();
-    };
+    return () => { unsubAdded(); unsubChanged(); };
   }, []);
 
-  // Auto-scroll on new message
+  // Yeni mesaj gelince otomatik kaydır
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
+  // ── Handlers ────────────────────────────────────────────────────────────────
   const handleSend = useCallback((e) => {
     e.preventDefault();
     if (!text.trim()) return;
     push(ref(rtdb, 'chat/messages'), {
       text: text.trim(),
       senderId: currentUser,
-      timestamp: serverTimestamp()
+      timestamp: serverTimestamp(),
     });
     setText('');
   }, [text, currentUser]);
@@ -196,43 +220,43 @@ export default function SharedChat({ currentUser }) {
     setEditingId(null);
   }, [editText]);
 
-  const inputForm = (
-    <form
-      onSubmit={handleSend}
-      className="px-3 pt-2 pb-3 bg-fuchsia-50/95 backdrop-blur-md border-t border-slate-200 flex gap-2 w-full"
-    >
-      <input
-        type="text"
-        value={text}
-        onChange={e => setText(e.target.value)}
-        placeholder="Tatlı bir şeyler yaz..."
-        className="flex-1 bg-white border border-slate-200 rounded-full px-4 py-3 focus:ring-2 focus:ring-sky-200 outline-none text-slate-700 transition-all text-[16px] font-medium min-w-0 shadow-sm"
-      />
-      <button
-        type="submit"
-        disabled={!text.trim()}
-        className="bg-sky-400 hover:bg-sky-500 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 text-white w-12 h-12 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-sm"
-      >
-        <Send size={20} className="translate-x-0.5" />
-      </button>
-    </form>
-  );
-
+  // ── Render ──────────────────────────────────────────────────────────────────
+  //
+  //  Yerleşim Modeli (klavye kapalı):
+  //  ┌──────────────────────────────────┐  ← App Header (flex-shrink-0, z-50)
+  //  │ Sohbetcan başlığı (sticky z-50)  │
+  //  ├──────────────────────────────────┤
+  //  │                                  │
+  //  │  Mesaj Listesi  (flex-1, scroll) │
+  //  │                                  │
+  //  ├──────────────────────────────────┤
+  //  │ Mesaj Yazma Kutusu               │  ← flex-shrink-0
+  //  ├──────────────────────────────────┤
+  //  │ Alt Menü (App.jsx'te)            │  ← App abs bottom
+  //  └──────────────────────────────────┘
+  //
+  //  Klavye açıkken: kbHeight px yukarı kayan bottom bar (App.jsx kbOffset)
+  //  Mesaj listesi: kalan tüm boşluğu doldurur (flex-1)
+  //
   return (
-    <div className="flex flex-col h-full w-full mx-auto overflow-hidden">
-      {/* ── 1. Chat header card ─────────────────── */}
-      <div className="flex-shrink-0 z-20 sticky top-0 bg-fuchsia-50/90 backdrop-blur-sm px-3 pt-2 pb-1">
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm border border-sky-100 px-4 py-3 flex items-center justify-between">
+    <div className="flex flex-col w-full h-full overflow-hidden">
+
+      {/* ── 1. Sohbetcan başlığı — sticky, z-50 ── */}
+      <div className="flex-shrink-0 z-50 sticky top-0 bg-fuchsia-50/95 backdrop-blur-sm px-3 pt-2 pb-1.5">
+        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm border border-sky-100 px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-lg">💬</span>
+            <span className="text-base">💬</span>
             <h2 className="font-bold text-slate-700 text-sm tracking-wide">Sohbetcan</h2>
           </div>
-          <span className="text-lg">🧡</span>
+          <span className="text-base">🧡</span>
         </div>
       </div>
 
-      {/* ── 2. Messages ─────────────────────────── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-3 pb-[180px]">
+      {/* ── 2. Mesaj listesi — flex-1, kendi scroll'u ── */}
+      <div
+        ref={listRef}
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-2 space-y-3"
+      >
         {messages.length === 0 && (
           <div className="h-full flex items-center justify-center text-slate-300 font-medium italic text-sm">
             Henüz kimse bir şey yazmamış...
@@ -256,12 +280,32 @@ export default function SharedChat({ currentUser }) {
           />
         ))}
 
-        {/* Scroll anchor */}
-        <div ref={messagesEndRef} className="pb-4" />
+        {/* Scroll anchor — en alta kaydırmak için */}
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* ── 3. Input bar injected into App.jsx portal ─── */}
-      {portalRoot ? createPortal(inputForm, portalRoot) : inputForm}
+      {/* ── 3. Mesaj yazma kutusu ── */}
+      <div className="flex-shrink-0 z-50 bg-fuchsia-50/98 backdrop-blur-md border-t border-slate-200/80">
+        <form onSubmit={handleSend} className="px-3 pt-2 pb-3">
+          {/* Modern Pill — input + buton tek kapsayıcı içinde */}
+          <div className="flex items-center bg-white rounded-full border border-slate-200/80 shadow-md overflow-hidden pl-4 pr-1 py-1 gap-2">
+            <input
+              type="text"
+              value={text}
+              onChange={e => setText(e.target.value)}
+              placeholder="Tatlı bir şeyler yaz..."
+              className="flex-1 bg-transparent outline-none text-slate-700 text-[16px] font-medium min-w-0 placeholder:text-slate-300"
+            />
+            <button
+              type="submit"
+              disabled={!text.trim()}
+              className="bg-sky-400 hover:bg-sky-500 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 text-white w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-sm"
+            >
+              <Send size={18} className="translate-x-0.5" />
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

@@ -11,7 +11,6 @@ function App() {
     return localStorage.getItem('currentUser') || 'zenep';
   });
   const [activeTab, setActiveTab] = useState('home');
-  const [vph, setVph] = useState(() => window.visualViewport?.height ?? window.innerHeight);
   const [kbOffset, setKbOffset] = useState(0);
 
   useEffect(() => {
@@ -23,8 +22,6 @@ function App() {
       const vv = window.visualViewport;
       if (vv) {
         const height = vv.height;
-        setVph(height);
-        
         const kh = window.innerHeight - height;
         const isOpen = kh > 150;
         
@@ -66,15 +63,18 @@ function App() {
   }, []);
 
   return (
-    <div style={{ height: vph }} className="bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col overflow-hidden w-full relative">
+    <div
+      className="bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col overflow-hidden"
+      style={{ position: 'fixed', inset: 0 }}
       {/* Header */}
       <div className="flex-shrink-0 z-30">
         <Header currentUser={currentUser} setCurrentUser={setCurrentUser} />
       </div>
 
       {/* Main content - Dynamic padding at the top for messages optionally handled by chat */}
-      <main className="flex-1 min-h-0 w-full max-w-[500px] mx-auto flex flex-col relative bg-fuchsia-50 pb-[140px]">
-        <div className={`flex-1 min-h-0 w-full flex flex-col ${activeTab !== 'chat' ? 'overflow-y-auto overflow-x-hidden pt-3' : ''}`}>
+      {/* Main content */}
+      <main className={`flex-1 min-h-0 w-full max-w-[500px] mx-auto flex flex-col relative bg-fuchsia-50 ${activeTab !== 'chat' ? 'pb-[140px]' : 'pb-[56px]'}`}>
+        <div className={`flex-1 min-h-0 w-full flex flex-col ${activeTab !== 'chat' ? 'overflow-y-auto overflow-x-hidden pt-3' : 'overflow-hidden'}`}>
           <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-400 text-sm">Yükleniyor...</div>}>
             {activeTab === 'home' && <Home currentUser={currentUser} />}
             {activeTab === 'namaz' && <PrayerTracker />}
@@ -84,13 +84,11 @@ function App() {
         </div>
       </main>
 
-      {/* Ortak Kapsayıcı (Alt Menü ve Mesaj Kutusu İçin) - Absolute, Justify-End, Z-Index 9999 */}
+      {/* Alt Menü — klavye açıkken yukarı kayar */}
       <div 
         className="absolute left-0 right-0 z-[9999] flex flex-col justify-end w-full max-w-[500px] mx-auto pointer-events-none"
         style={{ bottom: `${kbOffset}px` }}
       >
-        {/* Mesaj Kutusu İçin Portal Hedefi */}
-        <div id="chat-input-portal" className="pointer-events-auto w-full flex-shrink-0" />
 
         {/* Alt Menü Tab Bar */}
         <div className="pointer-events-auto flex-shrink-0 bg-white/95 backdrop-blur-md border-t border-slate-200/80 flex justify-around items-center px-2 sm:px-6 py-2 pb-[max(8px,env(safe-area-inset-bottom))] w-full">

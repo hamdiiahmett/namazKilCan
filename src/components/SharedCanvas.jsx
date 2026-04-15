@@ -198,6 +198,9 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // Kendi stroke'larımızın Firebase echo'larını atla (biz zaten lokalda çizdik)
   const pendingLocalRef      = useRef(new Set());
   const lastFillStrokeRef    = useRef(null);
+  // Fill için geri alma geçmişi: strokeId → { prevImageData }
+  // (sadece lokal kullanıcı için — sayfa yenilenince kaybolur, kabul edilebilir)
+  const fillHistoryRef       = useRef(new Map());
 
   // Throttle
   const lastPushTimeRef = useRef(0);
@@ -300,14 +303,15 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       // ── Flood Fill Snapshot ──
       if (seg.fillCanvas) {
         if (seg.strokeId === lastFillStrokeRef.current) {
-          // Kendi fill'imiz — zaten lokalda çizildi, sadece state'i temizle
+          // Kendi fill'imiz — zaten lokalda çizildi; history'yi KORUYARAK state'i temizle
           lastFillStrokeRef.current = null;
           allSegmentsRef.current    = [];
           undoneStrokesRef.current  = new Set();
           strokeBuffersRef.current  = new Map();
-          setHistory([]);
+          // setHistory'yi ÇAĞIRMIYORUZ: fill strokeId zaten history'de, undo çalışsın
           return;
         }
+        // Diğer kullanıcının fill'i
         const img = new Image();
         img.onload = () => {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -337,6 +341,21 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
       // ── Undo ──
       if (seg.undo) {
+        // Fill geri alma: önceki canvas snapshot'ını geri yükle
+        const fillData = fillHistoryRef.current.get(seg.strokeId);
+        if (fillData) {
+          const img = new Image();
+          img.onload = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            snapCtx.clearRect(0, 0, 500, 300);
+            snapCtx.drawImage(canvas, 0, 0);
+          };
+          img.src = fillData.prevImageData;
+          fillHistoryRef.current.delete(seg.strokeId);
+          return;
+        }
+        // Normal stroke geri alma
         undoneStrokesRef.current.add(seg.strokeId);
         strokeBuffersRef.current.delete(seg.strokeId);
         redrawAll(ctx, canvas);
@@ -387,24 +406,37 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     if (isFillRef.current) {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const pos     = getPos(e);
-      const ctx     = canvas.getContext('2d', { willReadFrequently: true });
-      const filled  = runFloodFill(ctx, canvas, pos.x, pos.y, colorRef.current);
+      const pos = getPos(e);
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      // Fill öncesi canvas'ı kaydet (undo için)
+      const prevTmp = document.createElement('canvas');
+      prevTmp.width = canvas.width; prevTmp.height = canvas.height;
+      prevTmp.getContext('2d').drawImage(canvas, 0, 0);
+      const prevImageData = prevTmp.toDataURL('image/jpeg', 0.8);
+
+      const filled = runFloodFill(ctx, canvas, pos.x, pos.y, colorRef.current);
       if (filled) {
         const strokeId = Date.now().toString(36) + Math.random().toString(36).slice(2);
         lastFillStrokeRef.current = strokeId;
-        const tmp = document.createElement('canvas');
-        tmp.width = canvas.width; tmp.height = canvas.height;
-        tmp.getContext('2d').drawImage(canvas, 0, 0);
+
+        // Lokal fillHistory'e ekle (undo bu ref'ten geri yükleyecek)
+        fillHistoryRef.current.set(strokeId, { prevImageData });
+
+        const postTmp = document.createElement('canvas');
+        postTmp.width = canvas.width; postTmp.height = canvas.height;
+        postTmp.getContext('2d').drawImage(canvas, 0, 0);
         push(ref(rtdb, 'canvas/segments'), {
           fillCanvas: true,
-          imageData:  tmp.toDataURL('image/jpeg', 0.8),
+          imageData:  postTmp.toDataURL('image/jpeg', 0.8),
           strokeId,
         });
-        allSegmentsRef.current    = [];
-        undoneStrokesRef.current  = new Set();
-        strokeBuffersRef.current  = new Map();
-        setHistory([]);
+
+        allSegmentsRef.current   = [];
+        undoneStrokesRef.current = new Set();
+        strokeBuffersRef.current = new Map();
+        // History'ye fill strokeId'yi ekle (setHistory([])'yi KULLANMA)
+        setHistory(prev => [...prev, strokeId]);
         // Snap canvas'ı güncelle
         snapCanvasRef.current?.getContext('2d').drawImage(canvas, 0, 0);
       }
@@ -561,11 +593,16 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const activeTool   = isFill ? 'fill' : isEraser ? 'eraser' : 'pen';
   const canvasCursor = isFill ? 'cursor-cell' : 'cursor-crosshair';
 
+  // Aktif araç butonu: belirgin glow + ring ile görsel geri bildirim
   const toolBtn = (active, fs) =>
-    `flex items-center justify-center w-8 h-8 rounded-full transition-all shadow-sm flex-shrink-0 ${
+    `flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 flex-shrink-0 ${
       active
-        ? fs ? 'bg-white text-slate-900 shadow-md scale-125' : 'bg-slate-800 text-white shadow-md scale-125'
-        : fs ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+        ? fs
+          ? 'bg-white text-slate-900 scale-125 shadow-lg ring-2 ring-white/70 ring-offset-1 ring-offset-slate-800'
+          : 'bg-slate-800 text-white scale-125 shadow-lg ring-2 ring-slate-400 ring-offset-1'
+        : fs
+          ? 'bg-slate-700 text-slate-300 hover:bg-slate-600 hover:scale-110'
+          : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:scale-110'
     }`;
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -619,18 +656,38 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
           {/* Renk + Araç Seçici */}
           <div className={`flex justify-center flex-wrap gap-2 px-4 py-2 rounded-full shadow-sm items-center w-full ${isFullscreen ? 'bg-slate-800/80' : 'bg-white'}`}>
-            {colors.map(c => (
-              <button
-                key={c}
-                onClick={() => { setColor(c); setIsEraser(false); setIsFill(false); }}
-                className={`w-8 h-8 rounded-full border-2 transition-transform shadow-sm flex-shrink-0 ${!isEraser && !isFill && color === c ? 'scale-125 border-slate-300 shadow-md' : 'border-transparent'}`}
-                style={{ backgroundColor: c }}
-              />
-            ))}
 
-            {/* Renk Çarkı (Özel Renk) */}
+            {/* ── Renk Paleti — tıklayınca otomatik Kalem moduna girer ── */}
+            {colors.map(c => {
+              const isPenActive = activeTool === 'pen' && color === c;
+              return (
+                <button
+                  key={c}
+                  onClick={() => { setColor(c); setIsEraser(false); setIsFill(false); }}
+                  className={[
+                    'w-8 h-8 rounded-full transition-all duration-200 shadow-sm flex-shrink-0',
+                    isPenActive
+                      // Aktif renk: scale + parlayan ring efekti
+                      ? 'scale-125 ring-2 ring-offset-1 shadow-md'
+                      : 'border-2 border-transparent hover:scale-110',
+                  ].join(' ')}
+                  style={{
+                    backgroundColor: c,
+                    // Aktif renk halesi kendi rengiyle parlıyor
+                    ...(isPenActive ? { ringColor: c, boxShadow: `0 0 0 2px white, 0 0 0 4px ${c}` } : {}),
+                  }}
+                />
+              );
+            })}
+
+            {/* Renk Çarkı (Özel Renk) — tıklayınca Kalem modu */}
             <div
-              className={`relative w-8 h-8 rounded-full border-2 transition-transform shadow-sm flex-shrink-0 overflow-hidden cursor-pointer ${!isEraser && !isFill && !colors.includes(color) ? 'scale-125 border-slate-300 shadow-md' : 'border-transparent'}`}
+              className={[
+                'relative w-8 h-8 rounded-full transition-all duration-200 shadow-sm flex-shrink-0 overflow-hidden cursor-pointer',
+                activeTool === 'pen' && !colors.includes(color)
+                  ? 'scale-125 ring-2 ring-offset-1 ring-slate-400 shadow-md'
+                  : 'border-2 border-transparent hover:scale-110',
+              ].join(' ')}
               style={{ background: 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)' }}
               title="Özel Renk Seç"
             >
@@ -662,14 +719,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
               <Eraser size={16} />
             </button>
 
-            {/* Kalem */}
-            <button
-              onClick={() => { setIsEraser(false); setIsFill(false); }}
-              className={toolBtn(activeTool === 'pen', isFullscreen)}
-              title="Kalem"
-            >
-              ✏️
-            </button>
+            {/* ── Kalem butonu kaldırıldı — renge tıklamak zaten kalem modunu aktif eder ── */}
           </div>
 
           {/* Fırça Boyutu Slider */}
