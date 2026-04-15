@@ -143,7 +143,8 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const [brushSize, setBrushSize] = useState(4);
   const [history, setHistory] = useState([]); // [{id, snapshot}]
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [recentColors, setRecentColors] = useState(['#ffffff', '#ffffff', '#ffffff', '#ffffff']);
+  const [recentColors, setRecentColors] = useState(['#fb7185', '#38bdf8', '#34d399', '#fbbf24']);
+  const [activeSlotIndex, setActiveSlotIndex] = useState(0);
 
   const colorRef = useRef(color);
   const isEraserRef = useRef(isEraser);
@@ -391,12 +392,26 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   }, [currentUser]);
 
   const handleColorPick = useCallback((newColor) => {
-    setColor(newColor); setIsEraser(false); setIsFill(false);
+    setColor(newColor);
+    setIsEraser(false);
+    setIsFill(false);
+    
     setRecentColors(prev => {
-      const filtered = prev.filter(c => c !== newColor || c === '#ffffff');
-      return [newColor, ...filtered].slice(0, 4);
+      const next = [...prev];
+      next[activeSlotIndex] = newColor;
+      return next;
     });
-  }, []);
+  }, [activeSlotIndex]);
+
+  const handleSlotClick = useCallback((index) => {
+    setActiveSlotIndex(index);
+    const slotColor = recentColors[index];
+    if (slotColor && slotColor !== '#ffffff' && slotColor !== 'transparent') {
+      setColor(slotColor);
+      setIsEraser(false);
+      setIsFill(false);
+    }
+  }, [recentColors]);
 
   return (
     <div className={`${isFullscreen ? 'fixed inset-0 z-[100] bg-slate-900/98 backdrop-blur-xl p-4 sm:p-8 flex flex-col' : 'bg-white rounded-[2.5rem] shadow-xl shadow-slate-200/50 border border-slate-100 p-5 sm:p-7'} flex flex-col items-center transition-all duration-500`}>
@@ -432,7 +447,16 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             <div className="w-[1px] h-5 mx-1 bg-slate-200 hidden sm:block" />
             <div className="flex gap-1.5 items-center px-1.5 py-1 bg-slate-50/50 rounded-full border border-slate-100">
               {recentColors.map((c, i) => (
-                <button key={`${c}-${i}`} onClick={() => handleColorPick(c)} className={`w-6 h-6 rounded-full transition-all duration-200 shadow-sm border ${color === c && !isEraser && !isFill ? 'scale-110 ring-2 ring-offset-1 ring-slate-300' : 'border-slate-100/50 hover:scale-110'}`} style={{ backgroundColor: c }} />
+                <button
+                  key={`${c}-${i}`}
+                  onClick={() => handleSlotClick(i)}
+                  className={`w-6 h-6 rounded-full transition-all duration-200 shadow-sm border ${
+                    activeSlotIndex === i 
+                      ? 'scale-125 ring-2 ring-offset-1 ring-sky-400 border-white z-10' 
+                      : 'border-slate-100/50 hover:scale-110 opacity-80'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
               ))}
             </div>
             <div className="w-[1px] h-5 mx-1 bg-slate-200 hidden sm:block" />
