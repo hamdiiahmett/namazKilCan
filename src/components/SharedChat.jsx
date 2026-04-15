@@ -104,11 +104,11 @@ MessageBubble.displayName = 'MessageBubble';
 //  SHARED CHAT
 // ══════════════════════════════════════════════════════════════════════════════
 export default function SharedChat({ currentUser }) {
-  const [messages,     setMessages]     = useState([]);
-  const [text,         setText]         = useState('');
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState('');
   const [activeMenuId, setActiveMenuId] = useState(null);
-  const [editingId,    setEditingId]    = useState(null);
-  const [editText,     setEditText]     = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState('');
 
   const messagesEndRef = useRef(null);
   const messagesMapRef = useRef(new Map());
@@ -186,7 +186,7 @@ export default function SharedChat({ currentUser }) {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
-      
+
       {/* ── 1. Başlık (Sohbetcan) ── */}
       <div className="flex-shrink-0 z-10 bg-white/95 backdrop-blur-sm sticky top-0 border-b border-slate-100">
         <div className="px-5 py-3 flex items-center justify-between">
@@ -194,7 +194,7 @@ export default function SharedChat({ currentUser }) {
             <span className="text-xl">💬</span>
             <div className="flex flex-col">
               <h2 className="font-bold text-slate-700 text-[14px] leading-tight tracking-tight">Sohbetcan</h2>
-              <span className="text-[10px] text-slate-400 font-medium">Harika anılar biriktirin🧡</span>
+              <span className="text-[10px] text-slate-400 font-medium">VOOOOOOOOOOO🧡</span>
             </div>
           </div>
           <div className="flex -space-x-2">
@@ -212,7 +212,7 @@ export default function SharedChat({ currentUser }) {
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center opacity-40 grayscale">
             <span className="text-4xl mb-2">🎈</span>
-            <p className="text-xs font-medium text-slate-500">Henüz mesaj yok.<br/>İlk selamı sen ver!</p>
+            <p className="text-xs font-medium text-slate-500">Henüz mesaj yok.<br />İlk selamı sen ver!</p>
           </div>
         ) : (
           messages.map((msg) => (
@@ -245,7 +245,7 @@ export default function SharedChat({ currentUser }) {
               type="text"
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="Bir şeyler yazın..."
+              placeholder="Birbirinizi övün :o ..."
               className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-4 text-slate-700 text-[16px] font-medium min-w-0 placeholder:text-slate-400"
             />
             <button
