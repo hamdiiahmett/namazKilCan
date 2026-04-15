@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, memo, useMemo } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onValue, set } from 'firebase/database';
 import { format } from 'date-fns';
@@ -17,54 +17,108 @@ const users = [
   { id: 'amet', name: 'Ametcan', city: 'Ankara' }
 ];
 
+// Namaz kartı — sadece kendi verisi değişince re-render olur
+const PrayerCard = memo(({ prayer, isDone, timeStr, onToggle }) => (
+  <div className="flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-slate-50 transition-colors hover:border-pink-200">
+    <div className="flex flex-col">
+      <span className="font-medium text-slate-700">{prayer.label}</span>
+      <span className="text-xs text-slate-400 font-mono">{timeStr}</span>
+    </div>
+    <button
+      onClick={onToggle}
+      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 shadow-inner 
+        ${isDone 
+          ? 'bg-gradient-to-tr from-green-400 to-emerald-300 shadow-green-200 text-white scale-110' 
+          : 'bg-slate-100 hover:bg-slate-200 text-transparent border border-slate-200'}`}
+    >
+      <Check size={18} strokeWidth={3} />
+    </button>
+  </div>
+));
+PrayerCard.displayName = 'PrayerCard';
+
+// Kullanıcı paneli — sadece kendi verisi değişince re-render olur
+const UserPanel = memo(({ user, timings, prayerState, todayStr }) => {
+  const togglePrayer = useCallback((prayerId) => {
+    const currentVal = prayerState?.[prayerId] || false;
+    set(ref(rtdb, `prayers/${todayStr}/${user.id}/${prayerId}`), !currentVal);
+  }, [prayerState, todayStr, user.id]);
+
+  return (
+    <div className="flex-1 bg-gradient-to-br from-white to-pink-50/50 p-4 rounded-2xl border border-pink-100 shadow-sm">
+      <h3 className="font-semibold text-pink-500 mb-4 text-center text-lg">{user.name} ({user.city})</h3>
+      <div className="space-y-3">
+        {PRAYERS.map(p => (
+          <PrayerCard
+            key={p.id}
+            prayer={p}
+            isDone={prayerState?.[p.id] || false}
+            timeStr={timings?.[p.id] || '--:--'}
+            onToggle={() => togglePrayer(p.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
+UserPanel.displayName = 'UserPanel';
+
 export default function PrayerTracker() {
   const [timings, setTimings] = useState({ zenep: null, amet: null });
   const [prayerState, setPrayerState] = useState({});
   const [loading, setLoading] = useState(true);
 
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayStr = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
   useEffect(() => {
-    // Fetch API
+    // API cache: aynı gün tekrar fetch etme
+    const cacheKey = `prayer_timings_${todayStr}`;
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        setTimings(JSON.parse(cached));
+        setLoading(false);
+        return;
+      } catch { /* cache bozuksa devam et */ }
+    }
+
+    const controller = new AbortController();
+
     const fetchTimings = async () => {
       try {
         const [resZ, resA] = await Promise.all([
-          fetch(`https://api.aladhan.com/v1/timingsByCity?city=Balikesir&country=Turkey&method=13`),
-          fetch(`https://api.aladhan.com/v1/timingsByCity?city=Ankara&country=Turkey&method=13`)
+          fetch(`https://api.aladhan.com/v1/timingsByCity?city=Balikesir&country=Turkey&method=13`, { signal: controller.signal }),
+          fetch(`https://api.aladhan.com/v1/timingsByCity?city=Ankara&country=Turkey&method=13`, { signal: controller.signal })
         ]);
         const dataZ = await resZ.json();
         const dataA = await resA.json();
-        setTimings({
+        const result = {
           zenep: dataZ.data.timings,
           amet: dataA.data.timings
-        });
+        };
+        setTimings(result);
+        sessionStorage.setItem(cacheKey, JSON.stringify(result));
       } catch (err) {
-        console.error("Prayer API error", err);
+        if (err.name !== 'AbortError') {
+          // Sessiz geç — kullanıcıyı rahatsız etme
+        }
       } finally {
         setLoading(false);
       }
     };
     fetchTimings();
-  }, []);
+
+    return () => controller.abort();
+  }, [todayStr]);
 
   useEffect(() => {
-    // DB dinleyicisi
     const todayRef = ref(rtdb, `prayers/${todayStr}`);
     const unsubscribe = onValue(todayRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setPrayerState(snapshot.val());
-      } else {
-        setPrayerState({});
-      }
+      setPrayerState(snapshot.exists() ? snapshot.val() : {});
     });
 
     return () => unsubscribe();
   }, [todayStr]);
-
-  const togglePrayer = (userId, prayerId) => {
-    const currentVal = prayerState[userId]?.[prayerId] || false;
-    set(ref(rtdb, `prayers/${todayStr}/${userId}/${prayerId}`), !currentVal);
-  };
 
   if (loading) return <div className="text-center p-6 text-pink-300 animate-pulse font-medium">Vakitler yükleniyor... ⏳</div>;
 
@@ -74,33 +128,13 @@ export default function PrayerTracker() {
       
       <div className="flex flex-col sm:flex-row gap-6 justify-between">
         {users.map(u => (
-          <div key={u.id} className="flex-1 bg-gradient-to-br from-white to-pink-50/50 p-4 rounded-2xl border border-pink-100 shadow-sm">
-            <h3 className="font-semibold text-pink-500 mb-4 text-center text-lg">{u.name} ({u.city})</h3>
-            <div className="space-y-3">
-              {PRAYERS.map(p => {
-                const isDone = prayerState[u.id]?.[p.id];
-                const timeStr = timings[u.id]?.[p.id] || '--:--';
-                
-                return (
-                  <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-slate-50 transition-colors hover:border-pink-200">
-                    <div className="flex flex-col">
-                      <span className="font-medium text-slate-700">{p.label}</span>
-                      <span className="text-xs text-slate-400 font-mono">{timeStr}</span>
-                    </div>
-                    <button
-                      onClick={() => togglePrayer(u.id, p.id)}
-                      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 shadow-inner 
-                        ${isDone 
-                          ? 'bg-gradient-to-tr from-green-400 to-emerald-300 shadow-green-200 text-white scale-110' 
-                          : 'bg-slate-100 hover:bg-slate-200 text-transparent border border-slate-200'}`}
-                    >
-                      <Check size={18} strokeWidth={3} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <UserPanel
+            key={u.id}
+            user={u}
+            timings={timings[u.id]}
+            prayerState={prayerState[u.id]}
+            todayStr={todayStr}
+          />
         ))}
       </div>
     </div>

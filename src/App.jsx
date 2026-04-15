@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import Header from './components/Header';
-import PrayerTracker from './components/PrayerTracker';
-import SharedChat from './components/SharedChat';
-import SharedCanvas from './components/SharedCanvas';
-import Home from './components/Home';
+
+const PrayerTracker = lazy(() => import('./components/PrayerTracker'));
+const SharedChat = lazy(() => import('./components/SharedChat'));
+const SharedCanvas = lazy(() => import('./components/SharedCanvas'));
+const Home = lazy(() => import('./components/Home'));
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => {
@@ -65,7 +66,7 @@ function App() {
   }, []);
 
   return (
-    <div style={{ height: window.innerHeight }} className="bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col overflow-hidden w-full relative">
+    <div style={{ height: vph }} className="bg-fuchsia-50 text-slate-800 font-sans selection:bg-pink-300 flex flex-col overflow-hidden w-full relative">
       {/* Header */}
       <div className="flex-shrink-0 z-30">
         <Header currentUser={currentUser} setCurrentUser={setCurrentUser} />
@@ -74,10 +75,12 @@ function App() {
       {/* Main content - Dynamic padding at the top for messages optionally handled by chat */}
       <main className="flex-1 min-h-0 w-full max-w-[500px] mx-auto flex flex-col relative bg-fuchsia-50 pb-[140px]">
         <div className={`flex-1 min-h-0 w-full flex flex-col ${activeTab !== 'chat' ? 'overflow-y-auto overflow-x-hidden pt-3' : ''}`}>
-          {activeTab === 'home' && <Home />}
-          {activeTab === 'namaz' && <PrayerTracker />}
-          {activeTab === 'chat' && <SharedChat currentUser={currentUser} />}
-          {activeTab === 'canvas' && <div className="px-2 sm:px-4"><SharedCanvas currentUser={currentUser} /></div>}
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-400 text-sm">Yükleniyor...</div>}>
+            {activeTab === 'home' && <Home />}
+            {activeTab === 'namaz' && <PrayerTracker />}
+            {activeTab === 'chat' && <SharedChat currentUser={currentUser} />}
+            {activeTab === 'canvas' && <div className="px-2 sm:px-4"><SharedCanvas currentUser={currentUser} /></div>}
+          </Suspense>
         </div>
       </main>
 

@@ -1,26 +1,130 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { rtdb } from '../firebase';
-import { ref, onValue, push, serverTimestamp, update } from 'firebase/database';
+import { ref, onChildAdded, onChildChanged, push, serverTimestamp, update } from 'firebase/database';
 import { Send } from 'lucide-react';
 import { format } from 'date-fns';
 
+// Mesaj balonunu ayrı component olarak memoize et — sadece kendi değişince re-render olur
+const MessageBubble = memo(({ msg, currentUser, activeMenuId, setActiveMenuId, onEditClick, onDelete, editingId, editText, setEditText, onSaveEdit, setEditingId }) => {
+  const isMe = msg.senderId === currentUser;
+  const timeString = msg.timestamp ? format(new Date(msg.timestamp), 'HH:mm') : '';
+
+  return (
+    <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+      {editingId === msg.id ? (
+        <div className="w-full max-w-[92%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
+          <input
+            autoFocus
+            value={editText}
+            onChange={e => setEditText(e.target.value)}
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[16px] outline-none focus:border-sky-300 transition-colors"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onSaveEdit(msg.id);
+              if (e.key === 'Escape') setEditingId(null);
+            }}
+          />
+          <div className="flex justify-end gap-2 text-xs font-medium">
+            <button onClick={() => setEditingId(null)}
+              className="px-3 py-1.5 text-slate-500 bg-slate-100 rounded-md hover:bg-slate-200 transition-colors">
+              İptal
+            </button>
+            <button onClick={() => onSaveEdit(msg.id)}
+              className="px-3 py-1.5 text-white bg-sky-400 rounded-md hover:bg-sky-500 transition-colors shadow-sm">
+              Kaydet
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className={`flex flex-col w-full ${isMe ? 'items-end' : 'items-start'}`}>
+          <div
+            onClick={() => {
+              if (isMe && !msg.isDeleted)
+                setActiveMenuId(activeMenuId === msg.id ? null : msg.id);
+            }}
+            className={[
+              'max-w-[80%] px-3 py-2 rounded-2xl shadow-sm relative text-[14px] leading-relaxed transition-colors',
+              isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : '',
+              isMe
+                ? msg.isDeleted
+                  ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none ml-auto'
+                  : 'bg-sky-400 text-white rounded-tr-none ml-auto'
+                : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none mr-auto'
+            ].join(' ')}
+          >
+            {msg.type === 'image' && !msg.isDeleted ? (
+              <div className="mt-1 mb-1 relative">
+                <img
+                  src={msg.imageUrl} alt="Çizim"
+                  loading="lazy"
+                  className="rounded-xl w-full max-w-[200px] border-2 border-white/20 shadow-sm bg-white"
+                />
+                <a
+                  href={msg.imageUrl}
+                  download={`cizim-${msg.timestamp || Date.now()}.png`}
+                  title="İndir"
+                  onClick={e => e.stopPropagation()}
+                  className="absolute bottom-1 right-1 bg-black/50 hover:bg-black/70 text-white p-1.5 rounded-lg backdrop-blur-sm transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" x2="12" y1="15" y2="3" />
+                  </svg>
+                </a>
+              </div>
+            ) : (
+              <div className="break-words">{msg.text}</div>
+            )}
+
+            <div className={`flex justify-end items-center gap-1 text-[10px] mt-0.5
+              ${isMe ? (msg.isDeleted ? 'text-slate-400' : 'text-sky-100') : 'text-slate-400'}`}>
+              {msg.isEdited && !msg.isDeleted && (
+                <span className="opacity-80 font-medium">(düzenlendi)</span>
+              )}
+              <span>{timeString}</span>
+            </div>
+          </div>
+
+          {activeMenuId === msg.id && (
+            <div className="mt-1.5 flex gap-2 justify-end mr-1 z-10">
+              {msg.type !== 'image' && (
+                <button onClick={() => onEditClick(msg)}
+                  className="text-xs font-medium bg-white text-slate-600 px-3 py-1.5 rounded-lg shadow-sm border border-slate-100 hover:bg-slate-50 transition-colors">
+                  Düzenle
+                </button>
+              )}
+              <button onClick={() => onDelete(msg.id)}
+                className="text-xs font-medium bg-white text-red-500 px-3 py-1.5 rounded-lg shadow-sm border border-red-100 hover:bg-red-50 transition-colors">
+                Sil
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+MessageBubble.displayName = 'MessageBubble';
+
 export default function SharedChat({ currentUser }) {
-  const [messages, setMessages]   = useState([]);
-  const [text, setText]           = useState('');
-  const messagesEndRef             = useRef(null);
+  const [messages, setMessages] = useState([]);
+  const [text, setText] = useState('');
+  const messagesEndRef = useRef(null);
 
   const [activeMenuId, setActiveMenuId] = useState(null);
-  const [editingId,    setEditingId]    = useState(null);
-  const [editText,     setEditText]     = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState('');
 
   const [portalRoot, setPortalRoot] = useState(null);
 
+  // Mesajları map olarak tut — O(1) lookup ile güncelleme
+  const messagesMapRef = useRef(new Map());
+
   useEffect(() => {
-    // Portal element App.jsx içinden geliyor
     setPortalRoot(document.getElementById('chat-input-portal'));
-    
-    // Resize listeners to keep messages scrolled
+
     const handler = () => {
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
     };
@@ -28,28 +132,43 @@ export default function SharedChat({ currentUser }) {
     return () => window.visualViewport?.removeEventListener('resize', handler);
   }, []);
 
-  // Firebase messages
   useEffect(() => {
     const chatRef = ref(rtdb, 'chat/messages');
-    const unsubscribe = onValue(chatRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const msgs = Object.entries(snapshot.val())
-          .map(([key, val]) => ({ id: key, ...val }));
-        msgs.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        setMessages(msgs);
-      } else {
-        setMessages([]);
-      }
+
+    // onChildAdded: sadece yeni gelen mesajı işle, tüm listeyi yeniden çekme
+    const unsubAdded = onChildAdded(chatRef, (snapshot) => {
+      const val = snapshot.val();
+      if (!val) return;
+      const msg = { id: snapshot.key, ...val };
+      messagesMapRef.current.set(snapshot.key, msg);
+      setMessages(prev => {
+        // Zaten varsa ekleme (duplicate engellemek için)
+        if (prev.some(m => m.id === snapshot.key)) return prev;
+        return [...prev, msg].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      });
     });
-    return () => unsubscribe();
+
+    // onChildChanged: sadece değişen mesajı güncelle (düzenle/sil)
+    const unsubChanged = onChildChanged(chatRef, (snapshot) => {
+      const val = snapshot.val();
+      if (!val) return;
+      const updated = { id: snapshot.key, ...val };
+      messagesMapRef.current.set(snapshot.key, updated);
+      setMessages(prev => prev.map(m => m.id === snapshot.key ? updated : m));
+    });
+
+    return () => {
+      unsubAdded();
+      unsubChanged();
+    };
   }, []);
 
   // Auto-scroll on new message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length]);
 
-  const handleSend = (e) => {
+  const handleSend = useCallback((e) => {
     e.preventDefault();
     if (!text.trim()) return;
     push(ref(rtdb, 'chat/messages'), {
@@ -58,24 +177,24 @@ export default function SharedChat({ currentUser }) {
       timestamp: serverTimestamp()
     });
     setText('');
-  };
+  }, [text, currentUser]);
 
-  const handleDelete = (id) => {
+  const handleDelete = useCallback((id) => {
     update(ref(rtdb, `chat/messages/${id}`), { isDeleted: true, text: '🚫 Bu mesaj silindi' });
     setActiveMenuId(null);
-  };
+  }, []);
 
-  const handleEditClick = (msg) => {
+  const handleEditClick = useCallback((msg) => {
     setEditingId(msg.id);
     setEditText(msg.text);
     setActiveMenuId(null);
-  };
+  }, []);
 
-  const handleSaveEdit = (id) => {
+  const handleSaveEdit = useCallback((id) => {
     if (!editText.trim()) return;
     update(ref(rtdb, `chat/messages/${id}`), { text: editText.trim(), isEdited: true });
     setEditingId(null);
-  };
+  }, [editText]);
 
   const inputForm = (
     <form
@@ -120,110 +239,24 @@ export default function SharedChat({ currentUser }) {
           </div>
         )}
 
-        {messages.map((msg, idx) => {
-          const isMe = msg.senderId === currentUser;
-          const timeString = msg.timestamp
-            ? format(new Date(msg.timestamp), 'HH:mm') : '';
+        {messages.map((msg) => (
+          <MessageBubble
+            key={msg.id}
+            msg={msg}
+            currentUser={currentUser}
+            activeMenuId={activeMenuId}
+            setActiveMenuId={setActiveMenuId}
+            onEditClick={handleEditClick}
+            onDelete={handleDelete}
+            editingId={editingId}
+            editText={editText}
+            setEditText={setEditText}
+            onSaveEdit={handleSaveEdit}
+            setEditingId={setEditingId}
+          />
+        ))}
 
-          return (
-            <div key={msg.id || idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              {editingId === msg.id ? (
-                /* Edit mode */
-                <div className="w-full max-w-[92%] bg-white p-3 rounded-2xl shadow-md border border-sky-100 flex flex-col gap-2">
-                  <input
-                    autoFocus
-                    value={editText}
-                    onChange={e => setEditText(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[16px] outline-none focus:border-sky-300 transition-colors"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveEdit(msg.id);
-                      if (e.key === 'Escape') setEditingId(null);
-                    }}
-                  />
-                  <div className="flex justify-end gap-2 text-xs font-medium">
-                    <button onClick={() => setEditingId(null)}
-                      className="px-3 py-1.5 text-slate-500 bg-slate-100 rounded-md hover:bg-slate-200 transition-colors">
-                      İptal
-                    </button>
-                    <button onClick={() => handleSaveEdit(msg.id)}
-                      className="px-3 py-1.5 text-white bg-sky-400 rounded-md hover:bg-sky-500 transition-colors shadow-sm">
-                      Kaydet
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Normal bubble */
-                <div className={`flex flex-col w-full ${isMe ? 'items-end' : 'items-start'}`}>
-                  <div
-                    onClick={() => {
-                      if (isMe && !msg.isDeleted)
-                        setActiveMenuId(activeMenuId === msg.id ? null : msg.id);
-                    }}
-                    className={[
-                      'max-w-[80%] px-3 py-2 rounded-2xl shadow-sm relative text-[14px] leading-relaxed transition-colors',
-                      isMe && !msg.isDeleted ? 'cursor-pointer hover:brightness-95' : '',
-                      isMe
-                        ? msg.isDeleted
-                          ? 'bg-sky-100/60 text-slate-400 italic rounded-tr-none ml-auto'
-                          : 'bg-sky-400 text-white rounded-tr-none ml-auto'
-                        : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none mr-auto'
-                    ].join(' ')}
-                  >
-                    {msg.type === 'image' && !msg.isDeleted ? (
-                      <div className="mt-1 mb-1 relative">
-                        <img
-                          src={msg.imageUrl} alt="Çizim"
-                          className="rounded-xl w-full max-w-[200px] border-2 border-white/20 shadow-sm bg-white"
-                        />
-                        <a
-                          href={msg.imageUrl}
-                          download={`cizim-${msg.timestamp || Date.now()}.png`}
-                          title="İndir"
-                          onClick={e => e.stopPropagation()}
-                          className="absolute bottom-1 right-1 bg-black/50 hover:bg-black/70 text-white p-1.5 rounded-lg backdrop-blur-sm transition-colors"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                            fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" x2="12" y1="15" y2="3" />
-                          </svg>
-                        </a>
-                      </div>
-                    ) : (
-                      <div className="break-words">{msg.text}</div>
-                    )}
-
-                    <div className={`flex justify-end items-center gap-1 text-[10px] mt-0.5
-                      ${isMe ? (msg.isDeleted ? 'text-slate-400' : 'text-sky-100') : 'text-slate-400'}`}>
-                      {msg.isEdited && !msg.isDeleted && (
-                        <span className="opacity-80 font-medium">(düzenlendi)</span>
-                      )}
-                      <span>{timeString}</span>
-                    </div>
-                  </div>
-
-                  {activeMenuId === msg.id && (
-                    <div className="mt-1.5 flex gap-2 justify-end mr-1 z-10">
-                      {msg.type !== 'image' && (
-                        <button onClick={() => handleEditClick(msg)}
-                          className="text-xs font-medium bg-white text-slate-600 px-3 py-1.5 rounded-lg shadow-sm border border-slate-100 hover:bg-slate-50 transition-colors">
-                          Düzenle
-                        </button>
-                      )}
-                      <button onClick={() => handleDelete(msg.id)}
-                        className="text-xs font-medium bg-white text-red-500 px-3 py-1.5 rounded-lg shadow-sm border border-red-100 hover:bg-red-50 transition-colors">
-                        Sil
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Scroll anchor with padding so last message doesn't hug input edge */}
+        {/* Scroll anchor */}
         <div ref={messagesEndRef} className="pb-4" />
       </div>
 

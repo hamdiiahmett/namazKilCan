@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onChildAdded, push, set, serverTimestamp } from 'firebase/database';
 import { Trash2, Eraser, Undo2, Send, Maximize, X } from 'lucide-react';
@@ -6,62 +6,87 @@ import { Trash2, Eraser, Undo2, Send, Maximize, X } from 'lucide-react';
 export default function SharedCanvas({ currentUser }) {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
-  const [color, setColor] = useState('#fb7185'); // pink
+  const [color, setColor] = useState('#fb7185');
   const [isEraser, setIsEraser] = useState(false);
   const [history, setHistory] = useState([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const colorRef = useRef(color);
   const isEraserRef = useRef(isEraser);
-  const lastPosRef = useRef(lastPos);
+  const lastPosRef = useRef({ x: 0, y: 0 });
+  const isDrawingRef = useRef(false);
 
   useEffect(() => { colorRef.current = color; }, [color]);
   useEffect(() => { isEraserRef.current = isEraser; }, [isEraser]);
-  useEffect(() => { lastPosRef.current = lastPos; }, [lastPos]);
 
   const currentStrokeIdRef = useRef('');
   const allSegmentsRef = useRef([]);
   const undoneStrokesRef = useRef(new Set());
 
+  // Throttle: Firebase'e max 30 kez/sn gönder (≈33ms aralık)
+  const lastPushTimeRef = useRef(0);
+  const pendingSegRef = useRef(null);
+  const pushTimerRef = useRef(null);
+
   const colors = ['#fb7185', '#38bdf8', '#34d399', '#fbbf24', '#a78bfa', '#475569'];
 
-  const getPos = (e) => {
+  const getPos = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-
-    // Scale CSS pixels to Canvas internal pixels (500x300)
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-
     return {
       x: (clientX - rect.left) * scaleX,
       y: (clientY - rect.top) * scaleY
     };
-  };
+  }, []);
 
-  const drawSegment = (ctx, seg) => {
+  const drawSegment = useCallback((ctx, seg) => {
     if (seg.clear || seg.undo) return;
     ctx.globalCompositeOperation = seg.isEraser ? 'destination-out' : 'source-over';
     ctx.lineWidth = seg.isEraser ? seg.width * 5 : seg.width;
-
     ctx.beginPath();
     ctx.moveTo(seg.x0, seg.y0);
     ctx.lineTo(seg.x1, seg.y1);
     ctx.strokeStyle = seg.isEraser ? 'rgba(0,0,0,1)' : seg.color;
     ctx.stroke();
     ctx.closePath();
-  };
+  }, []);
+
+  // Segment'i throttle ederek Firebase'e gönder
+  const pushSegment = useCallback((seg) => {
+    const now = Date.now();
+    const elapsed = now - lastPushTimeRef.current;
+
+    if (elapsed >= 33) {
+      // Doğrudan gönder
+      lastPushTimeRef.current = now;
+      push(ref(rtdb, 'canvas/segments'), seg);
+      pendingSegRef.current = null;
+    } else {
+      // Beklet, en güncel segmenti sakla
+      pendingSegRef.current = seg;
+      if (!pushTimerRef.current) {
+        pushTimerRef.current = setTimeout(() => {
+          pushTimerRef.current = null;
+          if (pendingSegRef.current) {
+            push(ref(rtdb, 'canvas/segments'), pendingSegRef.current);
+            lastPushTimeRef.current = Date.now();
+            pendingSegRef.current = null;
+          }
+        }, 33 - elapsed);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: false });
 
-    // Fixed internal size for perfect sync precision on any screen
     canvas.width = 500;
     canvas.height = 300;
     ctx.lineCap = 'round';
@@ -82,11 +107,12 @@ export default function SharedCanvas({ currentUser }) {
       if (seg.undo) {
         undoneStrokesRef.current.add(seg.strokeId);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        allSegmentsRef.current.forEach(s => {
+        // Sadece aktif stroke'ları çiz
+        for (const s of allSegmentsRef.current) {
           if (!undoneStrokesRef.current.has(s.strokeId)) {
             drawSegment(ctx, s);
           }
-        });
+        }
         return;
       }
 
@@ -95,25 +121,31 @@ export default function SharedCanvas({ currentUser }) {
         drawSegment(ctx, seg);
       }
     });
-    return () => unsubscribe();
-  }, []);
 
-  const startDraw = (e) => {
+    return () => {
+      unsubscribe();
+      // Bekleyen timer'ı temizle
+      if (pushTimerRef.current) {
+        clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = null;
+      }
+    };
+  }, [drawSegment]);
+
+  const startDraw = useCallback((e) => {
+    isDrawingRef.current = true;
     setIsDrawing(true);
     const pos = getPos(e);
-    setLastPos(pos);
     lastPosRef.current = pos;
-    const strokeId = Date.now().toString() + Math.random().toString();
+    const strokeId = Date.now().toString(36) + Math.random().toString(36).slice(2);
     currentStrokeIdRef.current = strokeId;
     setHistory(prev => [...prev, strokeId]);
-  };
+  }, [getPos]);
 
   useEffect(() => {
     if (!isDrawing) return;
 
     const handleMove = (e) => {
-      // Preventing default if possible to avoid scrolling globally while dragging,
-      // especially on mobile devices.
       if (e.cancelable && e.type === 'touchmove') {
         e.preventDefault();
       }
@@ -121,26 +153,44 @@ export default function SharedCanvas({ currentUser }) {
       const currentPos = getPos(e);
       const lp = lastPosRef.current;
 
-      push(ref(rtdb, 'canvas/segments'), {
-        strokeId: currentStrokeIdRef.current,
-        x0: lp.x,
-        y0: lp.y,
-        x1: currentPos.x,
-        y1: currentPos.y,
-        color: colorRef.current,
-        width: 4,
-        isEraser: isEraserRef.current
-      });
+      // Lokalda anlık çiz (gecikme olmadan)
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        const seg = {
+          strokeId: currentStrokeIdRef.current,
+          x0: lp.x, y0: lp.y,
+          x1: currentPos.x, y1: currentPos.y,
+          color: colorRef.current,
+          width: 4,
+          isEraser: isEraserRef.current
+        };
 
-      setLastPos(currentPos);
+        // Lokal çizim anlık
+        drawSegment(ctx, seg);
+
+        // Firebase'e throttle ile gönder
+        pushSegment(seg);
+      }
+
       lastPosRef.current = currentPos;
     };
 
     const handleEnd = () => {
+      isDrawingRef.current = false;
       setIsDrawing(false);
+      // Bekleyen son segmenti gönder
+      if (pendingSegRef.current) {
+        push(ref(rtdb, 'canvas/segments'), pendingSegRef.current);
+        pendingSegRef.current = null;
+        if (pushTimerRef.current) {
+          clearTimeout(pushTimerRef.current);
+          pushTimerRef.current = null;
+        }
+      }
     };
 
-    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mousemove', handleMove, { passive: false });
     window.addEventListener('mouseup', handleEnd);
     window.addEventListener('touchmove', handleMove, { passive: false });
     window.addEventListener('touchend', handleEnd);
@@ -153,23 +203,24 @@ export default function SharedCanvas({ currentUser }) {
       window.removeEventListener('touchend', handleEnd);
       window.removeEventListener('touchcancel', handleEnd);
     };
-  }, [isDrawing]);
+  }, [isDrawing, getPos, drawSegment, pushSegment]);
 
-  const clearCanvas = () => {
-    // Sil tuşu için rtdb değerini boşalt ve tüm cihazlardaki canvası temizlemek için bir 'clear' nesnesi yolla
+  const clearCanvas = useCallback(() => {
     setHistory([]);
+    allSegmentsRef.current = [];
+    undoneStrokesRef.current = new Set();
     set(ref(rtdb, 'canvas/segments'), null);
     push(ref(rtdb, 'canvas/segments'), { clear: true });
-  };
+  }, []);
 
-  const handleUndo = () => {
+  const handleUndo = useCallback(() => {
     if (history.length === 0) return;
     const lastStrokeId = history[history.length - 1];
     setHistory(prev => prev.slice(0, -1));
     push(ref(rtdb, 'canvas/segments'), { undo: true, strokeId: lastStrokeId });
-  };
+  }, [history]);
 
-  const handleSendToChat = () => {
+  const handleSendToChat = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -177,21 +228,19 @@ export default function SharedCanvas({ currentUser }) {
     tempCanvas.width = canvas.width;
     tempCanvas.height = canvas.height;
     const ctx = tempCanvas.getContext('2d');
-
-    // Beyaz arka plan
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     ctx.drawImage(canvas, 0, 0);
 
-    const base64Image = tempCanvas.toDataURL('image/png');
-
+    // JPEG + düşük kalite = çok daha küçük boyut (PNG'ye göre %70-80 küçük)
+    const base64Image = tempCanvas.toDataURL('image/jpeg', 0.6);
     push(ref(rtdb, 'chat/messages'), {
       type: 'image',
       imageUrl: base64Image,
       senderId: currentUser || 'Anonim',
       timestamp: serverTimestamp()
     });
-  };
+  }, [currentUser]);
 
   return (
     <div className={`${isFullscreen ? 'fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-md p-4 sm:p-8 overflow-y-auto' : 'bg-white/80 backdrop-blur-sm rounded-[2rem] shadow-sm border border-purple-100/50 p-6'} flex flex-col items-center transition-all duration-300`}>

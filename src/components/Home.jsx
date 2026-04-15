@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { rtdb } from '../firebase';
-import { ref, onValue } from 'firebase/database';
+import { ref, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -10,24 +10,34 @@ export default function Home() {
 
   useEffect(() => {
     const chatRef = ref(rtdb, 'chat/messages');
-    const unsubscribe = onValue(chatRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const msgs = Object.entries(data).map(([key, val]) => ({ id: key, ...val }));
-        
-        // Sadece silinmemiş resimleri filtrele
-        const validImages = msgs.filter(m => m.type === 'image' && !m.isDeleted);
-        
-        // Tarihe göre yeniden eskiye (descending) sırala
-        validImages.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        
-        setImages(validImages);
-      } else {
-        setImages([]);
+
+    // Sadece yeni eklenen resimleri al
+    const unsubAdded = onChildAdded(chatRef, (snapshot) => {
+      const val = snapshot.val();
+      if (!val || val.type !== 'image' || val.isDeleted) return;
+      const img = { id: snapshot.key, ...val };
+      setImages(prev => {
+        if (prev.some(m => m.id === snapshot.key)) return prev;
+        return [img, ...prev].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      });
+    });
+
+    // Silinen/düzenlenen resimleri güncelle
+    const unsubChanged = onChildChanged(chatRef, (snapshot) => {
+      const val = snapshot.val();
+      if (!val) return;
+      if (val.isDeleted) {
+        setImages(prev => prev.filter(m => m.id !== snapshot.key));
+      } else if (val.type === 'image') {
+        const updated = { id: snapshot.key, ...val };
+        setImages(prev => prev.map(m => m.id === snapshot.key ? updated : m));
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubAdded();
+      unsubChanged();
+    };
   }, []);
 
   const openLightbox = (index) => {
@@ -77,7 +87,9 @@ export default function Home() {
           >
             <img 
               src={latestImage.imageUrl} 
-              alt="Latest" 
+              alt="Latest"
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
@@ -110,7 +122,9 @@ export default function Home() {
               >
                 <img 
                   src={img.imageUrl} 
-                  alt="Thumbnail" 
+                  alt="Thumbnail"
+                  loading="lazy"
+                  decoding="async"
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
                 />
                 <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
