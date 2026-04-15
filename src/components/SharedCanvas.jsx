@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { rtdb } from '../firebase';
-import { ref, onChildAdded, push, set, serverTimestamp } from 'firebase/database';
+import { ref, onValue, push, set, serverTimestamp, remove } from 'firebase/database';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PURE HELPERS
@@ -53,46 +53,13 @@ function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  INLINE SVG ICONS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const IconFullscreen = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M15 3h6v6M9 21H3v-6M21 15v6h-6M3 9V3h6"/>
-  </svg>
-);
-
-const IconUndo = () => (
-  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
-  </svg>
-);
-
-const IconTrash = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2-2v2"/>
-  </svg>
-);
-
-const IconSend = () => (
-  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-  </svg>
-);
-
-const IconEraser = () => (
-  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>
-  </svg>
-);
-
-// ═══════════════════════════════════════════════════════════════════════════════
 //  MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- REFS ---
   const canvasRef = useRef(null);
+  const offscreenRef = useRef(null); // Used for layered composition
   const contextRef = useRef(null);
   const pointsRef = useRef([]);
   const isDrawingRef = useRef(false);
@@ -102,55 +69,157 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- CONFIG / PALETTE ---
   const mainColors = ['#ff808b', '#3bc1fb', '#34d399', '#fbbd23', '#a78bfa', '#475569'];
 
-  // --- STATE ---
+  // --- LOCAL STATE (ISOLATED) ---
   const [slots, setSlots] = useState(['#34d399', '#a78bfa', '#e2e8f0', '#e2e8f0']);
   const [activeSlot, setActiveSlot] = useState(1);
-  const [tool, setTool] = useState('pencil'); // 'pencil', 'eraser', 'fill'
-  const [brushSize, setBrushSize] = useState(5);
-  const [undoStack, setUndoStack] = useState([]);
-  const [redoStack, setRedoStack] = useState([]);
+  const [tool, setTool] = useState('pencil'); 
+  const [brushSize, setBrushSize] = useState(10);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // --- SYNC STATE ---
+  const [redoStack, setRedoStack] = useState([]); 
+  const [allSegments, setAllSegments] = useState([]);
 
   // --- DERIVED ---
   const currentColor = slots[activeSlot] || '#000000';
 
-  // --- REFS FOR SYNC CLOSURES ---
-  const toolRef = useRef(tool);
-  const currentColorRef = useRef(currentColor);
-  const brushSizeRef = useRef(brushSize);
+  // --- LAYERED REDRAW LOGIC ---
 
-  useEffect(() => { toolRef.current = tool; }, [tool]);
-  useEffect(() => { currentColorRef.current = currentColor; }, [currentColor]);
-  useEffect(() => { brushSizeRef.current = brushSize; }, [brushSize]);
-
-  // --- HELPERS ---
-
-  const saveToUndo = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setUndoStack(prev => [...prev.slice(-19), imageData]);
-    setRedoStack([]);
+  const drawSegment = useCallback((ctx, canvas, data) => {
+    if (data.type === 'fill') {
+        runFloodFill(ctx, canvas, data.x, data.y, data.color);
+        return;
+    }
+    if (data.type === 'draw') {
+        ctx.lineWidth = data.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (data.tool === 'eraser') {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.lineWidth = data.size * 4;
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = data.color;
+        }
+        ctx.beginPath();
+        if (!data.p3) {
+          ctx.moveTo(data.p1.x, data.p1.y);
+          ctx.lineTo(data.p2.x, data.p2.y);
+        } else {
+          const midX = (data.p2.x + data.p3.x) / 2;
+          const midY = (data.p2.y + data.p3.y) / 2;
+          ctx.moveTo(data.p1.x, data.p1.y);
+          ctx.quadraticCurveTo(data.p2.x, data.p2.y, midX, midY);
+        }
+        ctx.stroke();
+    }
   }, []);
 
-  const handleUndo = useCallback(() => {
-    if (undoStack.length === 0) return;
+  const redrawAll = useCallback((segments) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setRedoStack(prev => [...prev.slice(-19), currentData]);
-    const lastData = undoStack[undoStack.length - 1];
-    ctx.putImageData(lastData, 0, 0);
-    setUndoStack(prev => prev.slice(0, -1));
+    
+    // 1. Prepare Main Canvas (Background)
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    push(ref(rtdb, 'canvas/segments'), {
-      type: 'snapshot',
-      data: canvas.toDataURL('image/png'),
-      sender: currentUser || 'Anonim'
+    // 2. Prepare Offscreen Canvas
+    if (!offscreenRef.current) {
+        offscreenRef.current = document.createElement('canvas');
+    }
+    const offscreen = offscreenRef.current;
+    offscreen.width = canvas.width;
+    offscreen.height = canvas.height;
+    const octx = offscreen.getContext('2d', { willReadFrequently: true });
+
+    // 3. Group by Sender
+    const grouped = segments.reduce((acc, seg) => {
+        const uid = seg.senderId || 'Anonim';
+        if (!acc[uid]) acc[uid] = [];
+        acc[uid].push(seg);
+        return acc;
+    }, {});
+
+    // 4. Render Layers (Order: Others, then Me)
+    const userIds = Object.keys(grouped);
+    const sortedIds = [
+        ...userIds.filter(id => id !== currentUser),
+        ...(grouped[currentUser] ? [currentUser] : [])
+    ];
+
+    sortedIds.forEach(uid => {
+        octx.clearRect(0, 0, offscreen.width, offscreen.height);
+        octx.globalCompositeOperation = 'source-over';
+        grouped[uid].forEach(seg => {
+            if (seg.type === 'clear') {
+                return; // Handled globally
+            }
+            drawSegment(octx, offscreen, seg);
+        });
+        // Composite user's layer onto main canvas
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(offscreen, 0, 0);
     });
-  }, [undoStack, currentUser]);
+  }, [currentUser, drawSegment]);
+
+  // --- FIREBASE SYNC ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+    contextRef.current = canvas.getContext('2d', { willReadFrequently: true });
+
+    const segmentsRef = ref(rtdb, 'canvas/segments');
+    const unsubscribe = onValue(segmentsRef, (snapshot) => {
+      const data = snapshot.val();
+      const segmentsArray = [];
+      if (data) {
+        Object.keys(data).sort().forEach(key => {
+            if (data[key].type === 'clear') {
+                segmentsArray.length = 0; // Clear everything before
+            } else {
+                segmentsArray.push({ ...data[key], key });
+            }
+        });
+      }
+      setAllSegments(segmentsArray);
+      redrawAll(segmentsArray);
+    });
+
+    return () => unsubscribe();
+  }, [redrawAll]);
+
+  // --- ACTIONS ---
+
+  const handleUndo = async () => {
+    // Find my last stroke
+    const myStrokes = allSegments.filter(s => (s.senderId || 'Anonim') === currentUser);
+    if (myStrokes.length === 0) return;
+    
+    const lastId = myStrokes[myStrokes.length - 1].strokeId;
+    const targetSegments = allSegments.filter(s => s.strokeId === lastId);
+    
+    if (targetSegments.length > 0) {
+        setRedoStack(prev => [...prev, { strokeId: lastId, segments: targetSegments }]);
+        for (const seg of targetSegments) {
+            await remove(ref(rtdb, `canvas/segments/${seg.key}`));
+        }
+    }
+  };
+
+  const handleRedo = async () => {
+    if (redoStack.length === 0) return;
+    const toRestore = redoStack[redoStack.length - 1];
+    
+    for (const segData of toRestore.segments) {
+        const { key, ...cleanData } = segData;
+        await push(ref(rtdb, 'canvas/segments'), cleanData);
+    }
+    setRedoStack(prev => prev.slice(0, -1));
+  };
 
   const handleSendToChat = () => {
     const canvas = canvasRef.current;
@@ -164,15 +233,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   };
 
   const clearCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    saveToUndo();
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
     set(ref(rtdb, 'canvas/segments'), null);
     push(ref(rtdb, 'canvas/segments'), { type: 'clear' });
-  }, [saveToUndo]);
+    setRedoStack([]);
+  }, []);
 
   const getCoordinates = (e) => {
     const canvas = canvasRef.current;
@@ -193,14 +257,19 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
   const syncToFirebase = (seg) => {
     const now = Date.now();
-    if (now - lastSyncTimeRef.current < 40) return;
+    if (now - lastSyncTimeRef.current < 25) return;
     lastSyncTimeRef.current = now;
-    push(ref(rtdb, 'canvas/segments'), { ...seg, strokeId: strokeIdRef.current });
+    push(ref(rtdb, 'canvas/segments'), { 
+        ...seg, 
+        strokeId: strokeIdRef.current, 
+        senderId: currentUser || 'Anonim' 
+    });
   };
 
   const drawLocal = (p1, p2, p3, isSync = true) => {
     const ctx = contextRef.current;
     if (!ctx) return;
+    
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -228,83 +297,21 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     }
   };
 
-  // --- INITIALIZATION ---
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = canvas.offsetHeight * 2;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    contextRef.current = ctx;
-
-    const canvasRefDb = ref(rtdb, 'canvas/segments');
-    const unsubscribe = onChildAdded(canvasRefDb, (snapshot) => {
-      const data = snapshot.val();
-      if (!data) return;
-      if (data.type === 'clear') {
-        const oldFill = ctx.fillStyle;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = oldFill;
-      } else if (data.type === 'snapshot') {
-        const img = new Image();
-        img.onload = () => ctx.drawImage(img, 0, 0);
-        img.src = data.data;
-      } else if (data.type === 'draw') {
-        const originalTool = toolRef.current;
-        const originalColor = currentColorRef.current;
-        const originalSize = brushSizeRef.current;
-        ctx.lineWidth = data.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        if (data.tool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = data.size * 4;
-        } else {
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.strokeStyle = data.color;
-        }
-        ctx.beginPath();
-        if (!data.p3) {
-          ctx.moveTo(data.p1.x, data.p1.y);
-          ctx.lineTo(data.p2.x, data.p2.y);
-        } else {
-          const midX = (data.p2.x + data.p3.x) / 2;
-          const midY = (data.p2.y + data.p3.y) / 2;
-          ctx.moveTo(data.p1.x, data.p1.y);
-          ctx.quadraticCurveTo(data.p2.x, data.p2.y, midX, midY);
-        }
-        ctx.stroke();
-        ctx.globalCompositeOperation = originalTool === 'eraser' ? 'destination-out' : 'source-over';
-        ctx.strokeStyle = originalColor;
-        ctx.lineWidth = originalTool === 'eraser' ? originalSize * 4 : originalSize;
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
   // --- HANDLERS ---
 
   const startDrawing = (e) => {
     const coords = getCoordinates(e);
     if (!coords) return;
     if (tool === 'fill') {
-      saveToUndo();
-      if (runFloodFill(contextRef.current, canvasRef.current, coords.x, coords.y, currentColor)) {
-        push(ref(rtdb, 'canvas/segments'), {
-          type: 'snapshot',
-          data: canvasRef.current.toDataURL('image/png'),
-          sender: currentUser || 'Anonim'
-        });
-      }
+      const fillData = { type: 'fill', x: coords.x, y: coords.y, color: currentColor, strokeId: Math.random().toString(36).substring(7), senderId: currentUser || 'Anonim' };
+      push(ref(rtdb, 'canvas/segments'), fillData);
+      setRedoStack([]);
       return;
     }
-    saveToUndo();
     isDrawingRef.current = true;
     strokeIdRef.current = Math.random().toString(36).substring(7);
     pointsRef.current = [coords];
+    setRedoStack([]);
   };
 
   const draw = (e) => {
@@ -354,34 +361,38 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         </div>
         
         <div className="flex items-center gap-2">
-          <button 
-            onClick={() => setIsFullscreen(!isFullscreen)} 
-            className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl transition-all"
-            title="Tam Ekran"
-          >
-            <IconFullscreen />
-          </button>
-          <button 
-            onClick={handleUndo} 
-            disabled={undoStack.length === 0}
-            className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl disabled:opacity-30 transition-all"
-            title="Geri Al"
-          >
-            <IconUndo />
-          </button>
+          <div className="flex gap-1 bg-slate-50/50 p-1 rounded-xl">
+            <button 
+                onClick={handleUndo} 
+                disabled={allSegments.filter(s => (s.senderId || 'Anonim') === currentUser).length === 0}
+                className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 text-slate-400 rounded-lg disabled:opacity-30 transition-all shadow-sm"
+                title="Geri Al"
+            >
+                <span className="text-xl">↩️</span>
+            </button>
+            <button 
+                onClick={handleRedo} 
+                disabled={redoStack.length === 0}
+                className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 text-slate-400 rounded-lg disabled:opacity-30 transition-all shadow-sm"
+                title="İleri Al"
+            >
+                <span className="text-xl">↪️</span>
+            </button>
+          </div>
+
           <button 
             onClick={handleSendToChat} 
             className="w-10 h-10 flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-500 rounded-xl transition-all shadow-sm shadow-sky-100"
             title="Sohbete Gönder"
           >
-            <IconSend />
+            <span className="text-xl">✈️</span>
           </button>
           <button 
             onClick={clearCanvas} 
             className="w-10 h-10 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-400 rounded-xl transition-all"
             title="Temizle"
           >
-            <IconTrash />
+            <span className="text-xl">🗑️</span>
           </button>
         </div>
       </div>
@@ -398,6 +409,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
           className="w-full h-full block cursor-crosshair rounded-[2rem]"
+          style={{ touchAction: 'none' }}
         />
       </div>
 
@@ -450,10 +462,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
               </button>
               <button 
                 onClick={() => setTool('eraser')}
-                className={`p-3 rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
                 title="Silgi"
               >
-                <IconEraser />
+                <span className="text-2xl">🧼</span>
               </button>
            </div>
         </div>
