@@ -65,7 +65,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const isDrawingRef = useRef(false);
   const lastSyncTimeRef = useRef(0);
   const strokeIdRef = useRef(null);
-  const lastPosRef = useRef(null); // Tracking position for continuous local path
 
   // --- CONFIG / PALETTE ---
   const mainColors = ['#ff808b', '#3bc1fb', '#34d399', '#fbbd23', '#a78bfa', '#475569'];
@@ -84,7 +83,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- DERIVED ---
   const currentColor = slots[activeSlot] || '#000000';
 
-  // --- CONTINUOUS PATH REDRAW LOGIC ---
+  // --- ULTIMATE CONTINUOUS PATH REDRAW LOGIC ---
 
   const drawStrokeGroup = useCallback((ctx, canvas, stroke) => {
     if (stroke.type === 'fill') {
@@ -99,17 +98,16 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         
         if (stroke.tool === 'eraser') {
             ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = stroke.size * 5;
+            ctx.lineWidth = stroke.size * 5; // Eraser a bit bigger for better UX
         } else {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = stroke.color;
         }
 
+        // --- THE "FIX": ONE PATH PER STROKE ---
         ctx.beginPath();
         const pts = stroke.points;
         ctx.moveTo(pts[0].x, pts[0].y);
-        
-        // Connect all points in a single continuous path
         for (let i = 1; i < pts.length; i++) {
             ctx.lineTo(pts[i].x, pts[i].y);
         }
@@ -122,10 +120,12 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     
+    // 1. Prepare Main
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // 2. Prepare Scratch
     if (!offscreenRef.current) {
         offscreenRef.current = document.createElement('canvas');
     }
@@ -134,8 +134,8 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     offscreen.height = canvas.height;
     const octx = offscreen.getContext('2d', { willReadFrequently: true });
 
-    // 1. Group individual segments into continuous strokes
-    // We maintain chronological order by user layers
+    // 3. Process segments into grouped strokes
+    // Note: We MUST maintain alphabetical/chronological order by segment key
     const userStrokeGroups = {};
     
     segments.forEach(seg => {
@@ -145,10 +145,9 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         if (seg.type === 'fill') {
             userStrokeGroups[uid].push({ ...seg });
         } else if (seg.type === 'draw') {
-            // Find or create the stroke for this strokeId
-            let existingStroke = userStrokeGroups[uid].find(s => s.strokeId === seg.strokeId);
-            if (!existingStroke) {
-                existingStroke = { 
+            let sGroup = userStrokeGroups[uid].find(g => g.strokeId === seg.strokeId && g.type === 'draw');
+            if (!sGroup) {
+                sGroup = { 
                     type: 'draw', 
                     strokeId: seg.strokeId, 
                     tool: seg.tool, 
@@ -156,14 +155,13 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
                     size: seg.size, 
                     points: [] 
                 };
-                userStrokeGroups[uid].push(existingStroke);
+                userStrokeGroups[uid].push(sGroup);
             }
-            
-            // Extract points from segment data
+            // Collect points
             if (seg.curve) {
-                existingStroke.points.push(seg.start, seg.control, seg.end);
+                sGroup.points.push(seg.start, seg.control, seg.end);
             } else if (seg.p1 && seg.p2) {
-                existingStroke.points.push(seg.p1, seg.p2);
+                sGroup.points.push(seg.p1, seg.p2);
             }
         }
     });
@@ -177,17 +175,15 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     sortedIds.forEach(uid => {
         octx.clearRect(0, 0, offscreen.width, offscreen.height);
         octx.globalCompositeOperation = 'source-over';
-        
         userStrokeGroups[uid].forEach(stroke => {
             drawStrokeGroup(octx, offscreen, stroke);
         });
-        
         ctx.globalCompositeOperation = 'source-over';
         ctx.drawImage(offscreen, 0, 0);
     });
   }, [currentUser, drawStrokeGroup]);
 
-  // --- FIREBASE SYNC ---
+  // --- SYNC INIT ---
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -217,13 +213,28 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
   // --- ACTIONS ---
 
+  const stopDrawing = useCallback(() => {
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
+    pointsRef.current = [];
+  }, []);
+
+  // GLOBAL RELEASE HANDLER (BOUNDARY FIX)
+  useEffect(() => {
+    const handleGlobalUp = () => stopDrawing();
+    window.addEventListener('mouseup', handleGlobalUp);
+    window.addEventListener('touchend', handleGlobalUp, { passive: false });
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalUp);
+      window.removeEventListener('touchend', handleGlobalUp);
+    };
+  }, [stopDrawing]);
+
   const handleUndo = async () => {
     const myStrokes = allSegments.filter(s => (s.senderId || 'Anonim') === currentUser);
     if (myStrokes.length === 0) return;
-    
     const lastId = myStrokes[myStrokes.length - 1].strokeId;
     const targetSegments = allSegments.filter(s => s.strokeId === lastId);
-    
     if (targetSegments.length > 0) {
         setRedoStack(prev => [...prev, { strokeId: lastId, segments: targetSegments }]);
         for (const seg of targetSegments) {
@@ -235,7 +246,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const handleRedo = async () => {
     if (redoStack.length === 0) return;
     const toRestore = redoStack[redoStack.length - 1];
-    
     for (const segData of toRestore.segments) {
         const { key, ...cleanData } = segData;
         await push(ref(rtdb, 'canvas/segments'), cleanData);
@@ -279,60 +289,17 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
   const syncToFirebase = (seg) => {
     const now = Date.now();
-    if (now - lastSyncTimeRef.current < 25) return;
+    if (now - lastSyncTimeRef.current < 20) return; // Faster sync frequency
     lastSyncTimeRef.current = now;
     push(ref(rtdb, 'canvas/segments'), { 
         ...seg, 
         strokeId: strokeIdRef.current, 
-        senderId: currentUser || 'Anonim' 
+        senderId: currentUser || 'Anonim',
+        timestamp: serverTimestamp()
     });
   };
 
-  const drawLocalLine = (p1, p2, isSync = true) => {
-    const ctx = contextRef.current;
-    if (!ctx) return;
-    
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    
-    if (tool === 'eraser') {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.lineWidth = brushSize * 5;
-    } else {
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.strokeStyle = currentColor;
-    }
-
-    // Connect points using a simple but continuous line
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.stroke();
-
-    if (isSync) {
-        syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, curve: false, p1, p2 });
-    }
-  };
-
-  // --- HANDLERS ---
-
-  const stopDrawing = useCallback(() => {
-    if (!isDrawingRef.current) return;
-    isDrawingRef.current = false;
-    pointsRef.current = [];
-    lastPosRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    const handleGlobalUp = () => stopDrawing();
-    window.addEventListener('mouseup', handleGlobalUp);
-    window.addEventListener('touchend', handleGlobalUp);
-    return () => {
-      window.removeEventListener('mouseup', handleGlobalUp);
-      window.removeEventListener('touchend', handleGlobalUp);
-    };
-  }, [stopDrawing]);
+  // --- LIVE DRAWING ENGINE ---
 
   const startDrawing = (e) => {
     const coords = getCoordinates(e);
@@ -348,8 +315,24 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     isDrawingRef.current = true;
     strokeIdRef.current = Math.random().toString(36).substring(7);
     pointsRef.current = [coords];
-    lastPosRef.current = coords;
     setRedoStack([]);
+
+    // Open high-perf continuous path locally
+    const ctx = contextRef.current;
+    if (ctx) {
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (tool === 'eraser') {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.lineWidth = brushSize * 5;
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = currentColor;
+        }
+        ctx.beginPath();
+        ctx.moveTo(coords.x, coords.y);
+    }
   };
 
   const draw = (e) => {
@@ -357,13 +340,21 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     const coords = getCoordinates(e);
     if (!coords) return;
     
-    const prev = lastPosRef.current;
-    if (prev) {
-        drawLocalLine(prev, coords);
+    const ctx = contextRef.current;
+    if (ctx) {
+        // CONTINUOUS STEP: NO beginPath() here!
+        ctx.lineTo(coords.x, coords.y);
+        ctx.stroke();
     }
-    lastPosRef.current = coords;
+
+    const prev = pointsRef.current[pointsRef.current.length - 1];
     pointsRef.current.push(coords);
+    
+    // Immediate sync for multiplayer
+    syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, p1: prev, p2: coords });
   };
+
+  // --- UI HELPERS ---
 
   const handlePaletteClick = (color) => {
     const nextSlots = [...slots];
@@ -433,11 +424,12 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
+          // Removed stop on boundary check to allow global handler to catch it
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
           className="w-full h-full block cursor-crosshair rounded-[2rem]"
-          style={{ touchAction: 'none' }}
+          style={{ touchAction: 'none' }} // STOPS SCREEN SCROLLING
         />
       </div>
 
