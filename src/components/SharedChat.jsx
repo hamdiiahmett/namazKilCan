@@ -239,23 +239,23 @@ export default function SharedChat({ currentUser }) {
   //  Mesaj listesi: kalan tüm boşluğu doldurur (flex-1)
   //
   return (
-    <div className="flex flex-col w-full h-full overflow-hidden">
+    <div className="flex flex-col w-full h-full overflow-hidden bg-white">
 
-      {/* ── 1. Sohbetcan başlığı — sticky, z-50 ── */}
-      <div className="flex-shrink-0 z-50 sticky top-0 bg-fuchsia-50/95 backdrop-blur-sm px-3 pt-2 pb-1.5">
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm border border-sky-100 px-4 py-2.5 flex items-center justify-between">
+      {/* ── 1. Sohbetcan başlığı ── */}
+      <div className="flex-shrink-0 z-50 sticky top-0 bg-white/95 backdrop-blur-sm px-3 pt-2 pb-1.5 border-b border-slate-50">
+        <div className="bg-slate-50/80 backdrop-blur-sm rounded-2xl border border-slate-100 px-4 py-2 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-2">
             <span className="text-base">💬</span>
-            <h2 className="font-bold text-slate-700 text-sm tracking-wide">Sohbetcan</h2>
+            <h2 className="font-bold text-slate-600 text-sm tracking-wide">Sohbetcan</h2>
           </div>
-          <span className="text-base">🧡</span>
+          <span className="text-base text-slate-400 opacity-50">🧡</span>
         </div>
       </div>
 
-      {/* ── 2. Mesaj listesi — flex-1, kendi scroll'u ── */}
+      {/* ── 2. Mesaj listesi ── */}
       <div
         ref={listRef}
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-2 space-y-3"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-4"
       >
         {messages.length === 0 && (
           <div className="h-full flex items-center justify-center text-slate-300 font-medium italic text-sm">
@@ -285,21 +285,21 @@ export default function SharedChat({ currentUser }) {
       </div>
 
       {/* ── 3. Mesaj yazma kutusu ── */}
-      <div className="flex-shrink-0 z-50 bg-fuchsia-50/98 backdrop-blur-md border-t border-slate-200/80">
-        <form onSubmit={handleSend} className="px-3 pt-2 pb-3">
+      <div className="flex-shrink-0 z-50 bg-white border-t border-slate-100">
+        <form onSubmit={handleSend} className="px-3 py-3">
           {/* Modern Pill — input + buton tek kapsayıcı içinde */}
-          <div className="flex items-center bg-white rounded-full border border-slate-200/80 shadow-md overflow-hidden pl-4 pr-1 py-1 gap-2">
+          <div className="flex items-center bg-slate-50/80 rounded-full border border-slate-200 shadow-inner px-1 py-1 gap-2">
             <input
               type="text"
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="Tatlı bir şeyler yaz..."
-              className="flex-1 bg-transparent outline-none text-slate-700 text-[16px] font-medium min-w-0 placeholder:text-slate-300"
+              placeholder="Mesajınızı buraya yazın..."
+              className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-3 text-slate-700 text-[16px] font-medium min-w-0 placeholder:text-slate-400"
             />
             <button
               type="submit"
               disabled={!text.trim()}
-              className="bg-sky-400 hover:bg-sky-500 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 text-white w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-sm"
+              className="bg-sky-500 hover:bg-sky-600 active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 text-white w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center transition-all shadow-md"
             >
               <Send size={18} className="translate-x-0.5" />
             </button>

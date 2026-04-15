@@ -178,6 +178,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const [brushSize,    setBrushSize]    = useState(4);
   const [history,      setHistory]      = useState([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [recentColors, setRecentColors] = useState(['#fb7185', '#38bdf8', '#34d399', '#fbbf24']);
+
+  // Ref: Son geçerli Fill snapshot'ı (Redraw-safe arka plan)
+  const baseImageRef = useRef(null);
 
   // Ref'ler: event handler'larda her zaman güncel değer
   const colorRef     = useRef(color);
@@ -225,10 +229,15 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
   // ── Undo için tüm segmentleri yeniden çiz (smooth quadratic) ───────────────
   const redrawAll = useCallback((ctx, canvas) => {
+    // 1. Önce arka planı temizle ve varsa en son Fill Snapshot'ını bas
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    if (baseImageRef.current) {
+      ctx.drawImage(baseImageRef.current, 0, 0);
+    }
 
-    // Segmentleri strokeId'ye göre grupla (sıra korunarak)
+    // 2. Segmentleri strokeId'ye göre grupla (sıra korunarak)
     const order = [];
     const map   = new Map();
     for (const s of allSegmentsRef.current) {
@@ -303,12 +312,15 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       // ── Flood Fill Snapshot ──
       if (seg.fillCanvas) {
         if (seg.strokeId === lastFillStrokeRef.current) {
-          // Kendi fill'imiz — zaten lokalda çizildi; history'yi KORUYARAK state'i temizle
           lastFillStrokeRef.current = null;
           allSegmentsRef.current    = [];
           undoneStrokesRef.current  = new Set();
           strokeBuffersRef.current  = new Map();
-          // setHistory'yi ÇAĞIRMIYORUZ: fill strokeId zaten history'de, undo çalışsın
+          
+          // Kendi fill'imizi baseImageRef'e de kaydet ki Redraw bozulmasın
+          const img = new Image();
+          img.onload = () => { baseImageRef.current = img; };
+          img.src = seg.imageData;
           return;
         }
         // Diğer kullanıcının fill'i
@@ -318,6 +330,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           ctx.drawImage(img, 0, 0);
           snapCtx.clearRect(0, 0, 500, 300);
           snapCtx.drawImage(canvas, 0, 0);
+          baseImageRef.current = img; // Arka planı güncelle
         };
         img.src = seg.imageData;
         allSegmentsRef.current   = [];
@@ -435,10 +448,15 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         allSegmentsRef.current   = [];
         undoneStrokesRef.current = new Set();
         strokeBuffersRef.current = new Map();
-        // History'ye fill strokeId'yi ekle (setHistory([])'yi KULLANMA)
+        
+        // Base image'i güncelle
+        const fillImg = new Image();
+        fillImg.onload = () => { baseImageRef.current = fillImg; };
+        fillImg.src = postTmp.toDataURL('image/jpeg', 0.8);
+
         setHistory(prev => [...prev, strokeId]);
-        // Snap canvas'ı güncelle
         snapCanvasRef.current?.getContext('2d').drawImage(canvas, 0, 0);
+      }
       }
     } else {
       startDraw(e);
@@ -594,16 +612,20 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const canvasCursor = isFill ? 'cursor-cell' : 'cursor-crosshair';
 
   // Aktif araç butonu: belirgin glow + ring ile görsel geri bildirim
-  const toolBtn = (active, fs) =>
-    `flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 flex-shrink-0 ${
-      active
-        ? fs
-          ? 'bg-white text-slate-900 scale-125 shadow-lg ring-2 ring-white/70 ring-offset-1 ring-offset-slate-800'
-          : 'bg-slate-800 text-white scale-125 shadow-lg ring-2 ring-slate-400 ring-offset-1'
-        : fs
-          ? 'bg-slate-700 text-slate-300 hover:bg-slate-600 hover:scale-110'
-          : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:scale-110'
     }`;
+
+  // Renk seçimini yönet + Hafızaya ekle
+  const handleColorPick = useCallback((newColor) => {
+    setColor(newColor);
+    setIsEraser(false);
+    setIsFill(false);
+    
+    // RecentColors güncelle: Eğer zaten varsa öne çek, yoksa ekle ve sonuncuyu sil
+    setRecentColors(prev => {
+      const filtered = prev.filter(c => c !== newColor);
+      return [newColor, ...filtered].slice(0, 4);
+    });
+  }, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -663,24 +685,22 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
               return (
                 <button
                   key={c}
-                  onClick={() => { setColor(c); setIsEraser(false); setIsFill(false); }}
+                  onClick={() => handleColorPick(c)}
                   className={[
                     'w-8 h-8 rounded-full transition-all duration-200 shadow-sm flex-shrink-0',
                     isPenActive
-                      // Aktif renk: scale + parlayan ring efekti
                       ? 'scale-125 ring-2 ring-offset-1 shadow-md'
                       : 'border-2 border-transparent hover:scale-110',
                   ].join(' ')}
                   style={{
                     backgroundColor: c,
-                    // Aktif renk halesi kendi rengiyle parlıyor
                     ...(isPenActive ? { ringColor: c, boxShadow: `0 0 0 2px white, 0 0 0 4px ${c}` } : {}),
                   }}
                 />
               );
             })}
 
-            {/* Renk Çarkı (Özel Renk) — tıklayınca Kalem modu */}
+            {/* Renk Çarkı (Özel Renk) */}
             <div
               className={[
                 'relative w-8 h-8 rounded-full transition-all duration-200 shadow-sm flex-shrink-0 overflow-hidden cursor-pointer',
@@ -689,14 +709,30 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
                   : 'border-2 border-transparent hover:scale-110',
               ].join(' ')}
               style={{ background: 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)' }}
-              title="Özel Renk Seç"
             >
               <input
                 type="color"
                 value={colors.includes(color) ? '#000000' : color}
-                onChange={(e) => { setColor(e.target.value); setIsEraser(false); setIsFill(false); }}
+                onChange={(e) => handleColorPick(e.target.value)}
                 className="absolute inset-0 w-[150%] h-[150%] top-[-25%] left-[-25%] opacity-0 cursor-pointer"
               />
+            </div>
+
+            <div className={`w-[2px] h-6 mx-1 rounded-full hidden sm:block ${isFullscreen ? 'bg-slate-700' : 'bg-slate-200'}`} />
+
+            {/* ── Renklilik Hafızası (Son 4 Renk) ── */}
+            <div className="flex gap-1.5 items-center px-2 py-1 bg-slate-50/50 rounded-full border border-slate-100/50">
+              {recentColors.map((c, i) => {
+                const isActive = activeTool === 'pen' && color === c;
+                return (
+                  <button
+                    key={`${c}-${i}`}
+                    onClick={() => handleColorPick(c)}
+                    className={`w-6 h-6 rounded-full transition-all duration-200 shadow-sm border ${isActive ? 'scale-110 ring-2 ring-offset-1 ring-slate-300 border-white' : 'border-slate-100 hover:scale-105'}`}
+                    style={{ backgroundColor: c }}
+                  />
+                );
+              })}
             </div>
 
             <div className={`w-[2px] h-6 mx-1 rounded-full hidden sm:block ${isFullscreen ? 'bg-slate-700' : 'bg-slate-200'}`} />
@@ -705,7 +741,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             <button
               onClick={() => { setIsFill(true); setIsEraser(false); }}
               className={toolBtn(isFill, isFullscreen)}
-              title="Boya Kovası (Flood Fill)"
+              title="Boya Kovası"
             >
               <PaintBucket size={16} />
             </button>
@@ -718,9 +754,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             >
               <Eraser size={16} />
             </button>
-
-            {/* ── Kalem butonu kaldırıldı — renge tıklamak zaten kalem modunu aktif eder ── */}
           </div>
+
+          {/* ── Kalem butonu kaldırıldı — renge tıklamak zaten kalem modunu aktif eder ── */}
+        </div>
 
           {/* Fırça Boyutu Slider */}
           <div className={`flex items-center gap-3 px-5 py-2.5 rounded-2xl shadow-sm ${isFullscreen ? 'bg-slate-800/80' : 'bg-white'}`}>
