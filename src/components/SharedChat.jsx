@@ -245,7 +245,7 @@ export default function SharedChat({ currentUser }) {
               type="text"
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="Birbirinizi övün :o ..."
+              placeholder="Tatlı Mesajlar Yazın ..."
               className="flex-1 bg-transparent border-none focus:ring-0 outline-none px-4 text-slate-700 text-[16px] font-medium min-w-0 placeholder:text-slate-400"
             />
             <button
