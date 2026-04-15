@@ -76,7 +76,7 @@ function App() {
       <main className="flex-1 min-h-0 w-full max-w-[500px] mx-auto flex flex-col relative bg-fuchsia-50 pb-[140px]">
         <div className={`flex-1 min-h-0 w-full flex flex-col ${activeTab !== 'chat' ? 'overflow-y-auto overflow-x-hidden pt-3' : ''}`}>
           <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-400 text-sm">Yükleniyor...</div>}>
-            {activeTab === 'home' && <Home />}
+            {activeTab === 'home' && <Home currentUser={currentUser} />}
             {activeTab === 'namaz' && <PrayerTracker />}
             {activeTab === 'chat' && <SharedChat currentUser={currentUser} />}
             {activeTab === 'canvas' && <div className="px-2 sm:px-4"><SharedCanvas currentUser={currentUser} /></div>}
