@@ -1,23 +1,13 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { rtdb } from '../firebase';
-import { ref, onChildAdded, onValue, push, set, serverTimestamp } from 'firebase/database';
-import { 
-  Trash2, 
-  Eraser, 
-  Undo2, 
-  Redo2, 
-  Send, 
-  Maximize, 
-  X, 
-  PaintBucket, 
-  MousePointer2 
-} from 'lucide-react';
+import { ref, onChildAdded, push, set, serverTimestamp } from 'firebase/database';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PURE HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function hexToRgb(hex) {
+  if (!hex) return [0, 0, 0];
   const h = hex.replace('#', '');
   const f = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
   const n = parseInt(f, 16);
@@ -25,6 +15,7 @@ function hexToRgb(hex) {
 }
 
 function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
+  if (!ctx || !canvas) return false;
   sx = Math.floor(sx); sy = Math.floor(sy);
   const W = canvas.width, H = canvas.height;
   if (sx < 0 || sx >= W || sy < 0 || sy >= H) return false;
@@ -48,12 +39,9 @@ function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
     const lin = stack.pop();
     if (vis[lin]) continue;
     vis[lin] = 1;
-    
     const pi = lin * 4;
     if (!match(pi)) continue;
-    
     d[pi] = fr; d[pi + 1] = fg; d[pi + 2] = fb; d[pi + 3] = 255;
-    
     const x = lin % W, y = (lin / W) | 0;
     if (x + 1 < W)  stack.push(lin + 1);
     if (x - 1 >= 0) stack.push(lin - 1);
@@ -64,6 +52,44 @@ function runFloodFill(ctx, canvas, sx, sy, fillHex, tol = 32) {
   return true;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  INLINE SVG ICONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const IconFullscreen = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 3h6v6M9 21H3v-6M21 15v6h-6M3 9V3h6"/>
+  </svg>
+);
+
+const IconUndo = () => (
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 14L4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
+  </svg>
+);
+
+const IconTrash = () => (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2-2v2"/>
+  </svg>
+);
+
+const IconSend = () => (
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+  </svg>
+);
+
+const IconEraser = () => (
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/>
+  </svg>
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- REFS ---
   const canvasRef = useRef(null);
@@ -73,9 +99,12 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const lastSyncTimeRef = useRef(0);
   const strokeIdRef = useRef(null);
 
+  // --- CONFIG / PALETTE ---
+  const mainColors = ['#ff808b', '#3bc1fb', '#34d399', '#fbbd23', '#a78bfa', '#475569'];
+
   // --- STATE ---
-  const [slots, setSlots] = useState(['#fb7185', '#38bdf8', '#34d399', '#fbbf24']);
-  const [activeSlot, setActiveSlot] = useState(0);
+  const [slots, setSlots] = useState(['#34d399', '#a78bfa', '#e2e8f0', '#e2e8f0']);
+  const [activeSlot, setActiveSlot] = useState(1);
   const [tool, setTool] = useState('pencil'); // 'pencil', 'eraser', 'fill'
   const [brushSize, setBrushSize] = useState(5);
   const [undoStack, setUndoStack] = useState([]);
@@ -83,16 +112,25 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // --- DERIVED ---
-  const currentColor = slots[activeSlot];
+  const currentColor = slots[activeSlot] || '#000000';
 
-  // --- FUNCTIONS ---
+  // --- REFS FOR SYNC CLOSURES ---
+  const toolRef = useRef(tool);
+  const currentColorRef = useRef(currentColor);
+  const brushSizeRef = useRef(brushSize);
+
+  useEffect(() => { toolRef.current = tool; }, [tool]);
+  useEffect(() => { currentColorRef.current = currentColor; }, [currentColor]);
+  useEffect(() => { brushSizeRef.current = brushSize; }, [brushSize]);
+
+  // --- HELPERS ---
 
   const saveToUndo = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setUndoStack(prev => [...prev.slice(-19), imageData]); // Keep last 20
+    setUndoStack(prev => [...prev.slice(-19), imageData]);
     setRedoStack([]);
   }, []);
 
@@ -101,44 +139,29 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    
-    // Save current to Redo before applying Undo
     const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     setRedoStack(prev => [...prev.slice(-19), currentData]);
-
     const lastData = undoStack[undoStack.length - 1];
     ctx.putImageData(lastData, 0, 0);
     setUndoStack(prev => prev.slice(0, -1));
 
-    // Sync full canvas to Firebase for the other user
     push(ref(rtdb, 'canvas/segments'), {
       type: 'snapshot',
       data: canvas.toDataURL('image/png'),
-      sender: currentUser
+      sender: currentUser || 'Anonim'
     });
   }, [undoStack, currentUser]);
 
-  const handleRedo = useCallback(() => {
-    if (redoStack.length === 0) return;
+  const handleSendToChat = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-
-    // Save current to Undo before applying Redo
-    const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    setUndoStack(prev => [...prev.slice(-19), currentData]);
-
-    const nextData = redoStack[redoStack.length - 1];
-    ctx.putImageData(nextData, 0, 0);
-    setRedoStack(prev => prev.slice(0, -1));
-
-    // Sync full canvas to Firebase
-    push(ref(rtdb, 'canvas/segments'), {
-      type: 'snapshot',
-      data: canvas.toDataURL('image/png'),
-      sender: currentUser
+    push(ref(rtdb, 'chat/messages'), {
+      type: 'image',
+      imageUrl: canvas.toDataURL('image/png'),
+      senderId: currentUser || 'Anonim',
+      timestamp: serverTimestamp(),
     });
-  }, [redoStack, currentUser]);
+  };
 
   const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -147,18 +170,16 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
     set(ref(rtdb, 'canvas/segments'), null);
     push(ref(rtdb, 'canvas/segments'), { type: 'clear' });
   }, [saveToUndo]);
 
   const getCoordinates = (e) => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
+    if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    
     let clientX, clientY;
     if (e.touches && e.touches[0]) {
       clientX = e.touches[0].clientX;
@@ -167,16 +188,12 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       clientX = e.clientX;
       clientY = e.clientY;
     }
-
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
-    };
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
   };
 
   const syncToFirebase = (seg) => {
     const now = Date.now();
-    if (now - lastSyncTimeRef.current < 40) return; // 40ms throttle
+    if (now - lastSyncTimeRef.current < 40) return;
     lastSyncTimeRef.current = now;
     push(ref(rtdb, 'canvas/segments'), { ...seg, strokeId: strokeIdRef.current });
   };
@@ -184,11 +201,9 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const drawLocal = (p1, p2, p3, isSync = true) => {
     const ctx = contextRef.current;
     if (!ctx) return;
-
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
     if (tool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.lineWidth = brushSize * 4;
@@ -196,7 +211,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = currentColor;
     }
-
     ctx.beginPath();
     if (!p3) {
       ctx.moveTo(p1.x, p1.y);
@@ -210,32 +224,83 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     ctx.stroke();
 
     if (isSync) {
-      syncToFirebase({
-        type: 'draw',
-        tool,
-        color: currentColor,
-        size: brushSize,
-        p1, p2, p3
-      });
+      syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, p1, p2, p3 });
     }
   };
 
-  // --- EVENT HANDLERS ---
+  // --- INITIALIZATION ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    contextRef.current = ctx;
+
+    const canvasRefDb = ref(rtdb, 'canvas/segments');
+    const unsubscribe = onChildAdded(canvasRefDb, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
+      if (data.type === 'clear') {
+        const oldFill = ctx.fillStyle;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = oldFill;
+      } else if (data.type === 'snapshot') {
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0);
+        img.src = data.data;
+      } else if (data.type === 'draw') {
+        const originalTool = toolRef.current;
+        const originalColor = currentColorRef.current;
+        const originalSize = brushSizeRef.current;
+        ctx.lineWidth = data.size;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (data.tool === 'eraser') {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.lineWidth = data.size * 4;
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = data.color;
+        }
+        ctx.beginPath();
+        if (!data.p3) {
+          ctx.moveTo(data.p1.x, data.p1.y);
+          ctx.lineTo(data.p2.x, data.p2.y);
+        } else {
+          const midX = (data.p2.x + data.p3.x) / 2;
+          const midY = (data.p2.y + data.p3.y) / 2;
+          ctx.moveTo(data.p1.x, data.p1.y);
+          ctx.quadraticCurveTo(data.p2.x, data.p2.y, midX, midY);
+        }
+        ctx.stroke();
+        ctx.globalCompositeOperation = originalTool === 'eraser' ? 'destination-out' : 'source-over';
+        ctx.strokeStyle = originalColor;
+        ctx.lineWidth = originalTool === 'eraser' ? originalSize * 4 : originalSize;
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- HANDLERS ---
 
   const startDrawing = (e) => {
     const coords = getCoordinates(e);
+    if (!coords) return;
     if (tool === 'fill') {
       saveToUndo();
       if (runFloodFill(contextRef.current, canvasRef.current, coords.x, coords.y, currentColor)) {
         push(ref(rtdb, 'canvas/segments'), {
           type: 'snapshot',
           data: canvasRef.current.toDataURL('image/png'),
-          sender: currentUser
+          sender: currentUser || 'Anonim'
         });
       }
       return;
     }
-
     saveToUndo();
     isDrawingRef.current = true;
     strokeIdRef.current = Math.random().toString(36).substring(7);
@@ -245,9 +310,9 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const draw = (e) => {
     if (!isDrawingRef.current) return;
     const coords = getCoordinates(e);
+    if (!coords) return;
     const pts = pointsRef.current;
     pts.push(coords);
-
     if (pts.length === 2) {
       drawLocal(pts[0], pts[1], null);
     } else if (pts.length > 2) {
@@ -264,118 +329,65 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     pointsRef.current = [];
   };
 
-  // --- INITIALIZATION & SYNC ---
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    // Set internal resolution
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = canvas.offsetHeight * 2;
-
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    contextRef.current = ctx;
-
-    const canvasRefDb = ref(rtdb, 'canvas/segments');
-    const unsubscribe = onChildAdded(canvasRefDb, (snapshot) => {
-      const data = snapshot.val();
-      if (!data) return;
-
-      if (data.type === 'clear') {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      } else if (data.type === 'snapshot') {
-        const img = new Image();
-        img.onload = () => ctx.drawImage(img, 0, 0);
-        img.src = data.data;
-      } else if (data.type === 'draw') {
-        // External drawing sync
-        const originalTool = tool;
-        const originalColor = currentColor;
-        const originalSize = brushSize;
-
-        ctx.lineWidth = data.size;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        if (data.tool === 'eraser') {
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = data.size * 4;
-        } else {
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.strokeStyle = data.color;
-        }
-
-        ctx.beginPath();
-        if (!data.p3) {
-          ctx.moveTo(data.p1.x, data.p1.y);
-          ctx.lineTo(data.p2.x, data.p2.y);
-        } else {
-          const midX = (data.p2.x + data.p3.x) / 2;
-          const midY = (data.p2.y + data.p3.y) / 2;
-          ctx.moveTo(data.p1.x, data.p1.y);
-          ctx.quadraticCurveTo(data.p2.x, data.p2.y, midX, midY);
-        }
-        ctx.stroke();
-
-        // Restore local state after remote draw
-        ctx.globalCompositeOperation = originalTool === 'eraser' ? 'destination-out' : 'source-over';
-        ctx.strokeStyle = originalColor;
-        ctx.lineWidth = originalTool === 'eraser' ? originalSize * 4 : originalSize;
-      }
-    });
-
-    return () => unsubscribe();
-  }, [currentColor, tool, brushSize]);
-
-  const handleSlotClick = (index) => {
-    setActiveSlot(index);
-    if (tool === 'eraser') setTool('pencil');
+  const handlePaletteClick = (color) => {
+    const nextSlots = [...slots];
+    nextSlots[activeSlot] = color;
+    setSlots(nextSlots);
+    setTool('pencil');
   };
 
-  const updateActiveSlotColor = (newColor) => {
-    setSlots(prev => {
-      const next = [...prev];
-      next[activeSlot] = newColor;
-      return next;
-    });
-    if (tool === 'eraser') setTool('pencil');
-  };
-
-  const handleSendToChat = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    push(ref(rtdb, 'chat/messages'), {
-      type: 'image',
-      imageUrl: canvas.toDataURL('image/png'),
-      senderId: currentUser || 'Anonim',
-      timestamp: serverTimestamp(),
-    });
+  const handleWheelChange = (color) => {
+    const nextSlots = [...slots];
+    nextSlots[activeSlot] = color;
+    setSlots(nextSlots);
+    setTool('pencil');
   };
 
   return (
     <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-50 bg-slate-900/95 backdrop-blur-md p-4' : 'relative'}`}>
       
-      {/* Header Info */}
-      <div className="w-full max-w-4xl flex justify-between items-center mb-4 px-2">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className={`text-xs font-medium ${isFullscreen ? 'text-slate-300' : 'text-slate-500'}`}>Shared Canvas Canlı</span>
+      {/* Header */}
+      <div className="w-full max-w-4xl flex justify-between items-center mb-4 px-4 h-16 bg-white/50 backdrop-blur-sm rounded-3xl">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">🎨</span>
+          <span className="text-lg font-bold text-slate-700 tracking-tight">Çizim Alanı</span>
         </div>
-        <div className="flex gap-2">
-           <button 
+        
+        <div className="flex items-center gap-2">
+          <button 
             onClick={() => setIsFullscreen(!isFullscreen)} 
-            className={`p-2 rounded-xl transition-all ${isFullscreen ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-white shadow-sm text-slate-400 hover:bg-slate-50 border border-slate-100'}`}
+            className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl transition-all"
+            title="Tam Ekran"
           >
-            {isFullscreen ? <X size={18} /> : <Maximize size={18} />}
+            <IconFullscreen />
+          </button>
+          <button 
+            onClick={handleUndo} 
+            disabled={undoStack.length === 0}
+            className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl disabled:opacity-30 transition-all"
+            title="Geri Al"
+          >
+            <IconUndo />
+          </button>
+          <button 
+            onClick={handleSendToChat} 
+            className="w-10 h-10 flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-500 rounded-xl transition-all shadow-sm shadow-sky-100"
+            title="Sohbete Gönder"
+          >
+            <IconSend />
+          </button>
+          <button 
+            onClick={clearCanvas} 
+            className="w-10 h-10 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-400 rounded-xl transition-all"
+            title="Temizle"
+          >
+            <IconTrash />
           </button>
         </div>
       </div>
 
-      {/* Canvas Area */}
-      <div className={`relative w-full max-w-4xl aspect-[4/3] sm:aspect-video bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-slate-100 touch-none group`}>
+      {/* Canvas Area with Dashed Border */}
+      <div className="relative w-full max-w-4xl aspect-[4/3] sm:aspect-video bg-white rounded-[2.5rem] p-6 shadow-xl-soft border-2 border-dashed border-slate-200 shadow-canvas">
         <canvas
           ref={canvasRef}
           onMouseDown={startDrawing}
@@ -385,105 +397,100 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
-          className={`w-full h-full block cursor-crosshair ${tool === 'fill' ? 'cursor-alias' : ''}`}
+          className="w-full h-full block cursor-crosshair rounded-[2rem]"
         />
       </div>
 
-      {/* Modern Control Panel */}
-      <div className={`mt-6 w-full max-w-4xl flex flex-col gap-4 bg-white/80 backdrop-blur-lg p-5 rounded-[2.5rem] shadow-xl border border-white/50 mb-[80px] transition-all duration-500 ${isFullscreen ? 'translate-y-[-20px]' : ''}`}>
+      {/* 3-Row Toolbar */}
+      <div className="mt-8 w-full max-w-md flex flex-col gap-5 p-6 bg-white rounded-[3rem] shadow-toolbar border border-slate-50">
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-          
-          {/* Left Side: Slots & Tools */}
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Color Slots */}
-            <div className="flex bg-slate-100/50 p-1.5 rounded-2xl gap-1.5 border border-slate-200/40">
+        {/* Row 1: Fixed Colors + Wheel */}
+        <div className="flex items-center justify-center gap-3">
+          {mainColors.map(c => (
+            <button
+              key={c}
+              onClick={() => handlePaletteClick(c)}
+              className={`w-10 h-10 rounded-full transition-all border-4 ${currentColor === c ? 'border-indigo-400 scale-110 shadow-lg' : 'border-white hover:scale-105'}`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          <div className="w-[1px] h-6 bg-slate-100 mx-1" />
+          <div className="relative w-10 h-10 rounded-full overflow-hidden border-4 border-white shadow-sm hover:scale-110 transition-all ring-2 ring-slate-100" style={{ background: 'conic-gradient(from 180deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)' }}>
+            <input 
+              type="color" 
+              value={currentColor} 
+              onChange={(e) => handleWheelChange(e.target.value)} 
+              className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0"
+            />
+          </div>
+        </div>
+
+        {/* Row 2: Independent Slots & Tools */}
+        <div className="flex items-center justify-center gap-5">
+           <div className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 rounded-2xl">
               {slots.map((c, i) => (
                 <button
                   key={i}
-                  onClick={() => handleSlotClick(i)}
-                  className={`w-10 h-10 rounded-xl transition-all duration-300 relative ${activeSlot === i ? 'scale-110 shadow-lg ring-2 ring-white z-10' : 'opacity-60 hover:opacity-100 hover:scale-105'}`}
+                  onClick={() => setActiveSlot(i)}
+                  className={`w-8 h-8 rounded-full transition-all border-4 ${activeSlot === i ? 'border-indigo-400 scale-125 shadow-md z-10' : 'border-white opacity-40 hover:opacity-100'}`}
                   style={{ backgroundColor: c }}
-                >
-                  {activeSlot === i && (
-                    <div className="absolute inset-0 rounded-xl border-2 border-slate-800/20" />
-                  )}
-                </button>
-              ))}
-              <div className="relative w-10 h-10 rounded-xl overflow-hidden border-2 border-white shadow-sm hover:scale-105 transition-transform" style={{ background: 'conic-gradient(from 180deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)' }}>
-                <input 
-                  type="color" 
-                  value={currentColor} 
-                  onChange={(e) => updateActiveSlotColor(e.target.value)} 
-                  className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0"
                 />
-              </div>
-            </div>
+              ))}
+           </div>
 
-            <div className="h-8 w-[1px] bg-slate-200 mx-1" />
+           <div className="w-[1px] h-8 bg-slate-200" />
 
-            {/* Tools */}
-            <div className="flex gap-2">
+           <div className="flex items-center gap-3">
               <button 
-                onClick={() => setTool('pencil')} 
-                className={`p-3 rounded-2xl transition-all ${tool === 'pencil' ? 'bg-slate-800 text-white shadow-lg scale-105' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                onClick={() => setTool('fill')}
+                className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'fill' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                title="Boya Kovası"
               >
-                <MousePointer2 size={20} />
-              </button>
-              <button 
-                onClick={() => setTool('fill')} 
-                className={`p-3 rounded-2xl transition-all ${tool === 'fill' ? 'bg-slate-800 text-white shadow-lg scale-105' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-              >
-                <PaintBucket size={20} />
+                <span className="text-2xl">🪣</span>
               </button>
               <button 
-                onClick={() => setTool('eraser')} 
-                className={`p-3 rounded-2xl transition-all ${tool === 'eraser' ? 'bg-slate-800 text-white shadow-lg scale-105' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                onClick={() => setTool('eraser')}
+                className={`p-3 rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                title="Silgi"
               >
-                <Eraser size={20} />
+                <IconEraser />
               </button>
-            </div>
-          </div>
-
-          {/* Right Side: History & Actions */}
-          <div className="flex flex-wrap items-center justify-end gap-3">
-             <div className="flex gap-2 bg-slate-50 p-1 rounded-2xl border border-slate-100">
-              <button onClick={handleUndo} disabled={undoStack.length === 0} className="p-3 text-slate-600 hover:bg-white hover:shadow-sm rounded-xl disabled:opacity-20 transition-all">
-                <Undo2 size={20} />
-              </button>
-              <button onClick={handleRedo} disabled={redoStack.length === 0} className="p-3 text-slate-600 hover:bg-white hover:shadow-sm rounded-xl disabled:opacity-20 transition-all">
-                <Redo2 size={20} />
-              </button>
-            </div>
-            
-            <button onClick={clearCanvas} className="p-3 bg-rose-50 text-rose-500 hover:bg-rose-100 rounded-2xl transition-all border border-rose-100 shadow-sm">
-              <Trash2 size={20} />
-            </button>
-
-            <button onClick={handleSendToChat} className="flex items-center gap-2 px-6 py-3 bg-sky-500 hover:bg-sky-600 text-white rounded-2xl shadow-lg shadow-sky-200 transition-all font-bold text-sm">
-              <span>Paylaş</span>
-              <Send size={18} />
-            </button>
-          </div>
+           </div>
         </div>
 
-        {/* Thickness Slider */}
-        <div className="flex items-center gap-4 bg-slate-50/50 p-4 rounded-3xl border border-slate-100">
-          <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center">
-             <div style={{ width: Math.max(2, brushSize / 2), height: Math.max(2, brushSize / 2), backgroundColor: currentColor, borderRadius: '50%' }} className="transition-all duration-200" />
-          </div>
-          <input 
-            type="range" 
-            min="1" 
-            max="50" 
-            value={brushSize} 
+        {/* Row 3: Thickness Slider */}
+        <div className="flex items-center gap-4 bg-slate-50/30 p-3 rounded-2xl">
+           <div className="w-8 h-8 flex items-center justify-center">
+             <div style={{ width: Math.max(2, brushSize/2), height: Math.max(2, brushSize/2), backgroundColor: currentColor, borderRadius: '50%' }} className="transition-all" />
+           </div>
+           <input 
+            type="range" min="1" max="50" value={brushSize} 
             onChange={(e) => setBrushSize(Number(e.target.value))} 
-            className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-800"
+            className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-pink-400"
           />
-          <span className="text-xs font-bold text-slate-400 w-10">{brushSize}px</span>
+          <span className="text-[10px] font-bold text-slate-400 w-8">{brushSize}px</span>
         </div>
 
       </div>
+      
+      <style dangerouslySetInnerHTML={{ __html: `
+        .shadow-xl-soft { box-shadow: 0 20px 60px -15px rgba(0,0,0,0.05); }
+        .shadow-canvas { box-shadow: inset 0 0 40px rgba(0,0,0,0.02); }
+        .shadow-toolbar { box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08); }
+        input[type=range]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          height: 18px;
+          width: 18px;
+          border-radius: 50%;
+          background: #f472b6;
+          box-shadow: 0 2px 10px rgba(244, 114, 182, 0.4);
+          cursor: pointer;
+          border: 3px solid white;
+          transition: all 0.2s;
+        }
+        input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+      `}} />
+
     </div>
   );
 });
