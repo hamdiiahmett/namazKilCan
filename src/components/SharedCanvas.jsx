@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onValue, push, set, serverTimestamp, remove, update } from 'firebase/database';
+import { Maximize2, Minimize2 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PURE HELPERS
@@ -106,7 +107,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         }
 
         const pts = stroke.points;
-        // --- STABLE & NATURAL ENGINE: Plain lineTo loop ---
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (let i = 1; i < pts.length; i++) {
@@ -158,7 +158,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             ...(userStrokeGroups[currentUser] ? [currentUser] : [])
         ];
 
-        // Layered Rendering (Eraser isolation)
         sortedIds.forEach(uid => {
             octx.clearRect(0, 0, offscreen.width, offscreen.height);
             octx.globalCompositeOperation = 'source-over';
@@ -236,7 +235,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     const targetStrokes = allSegments.filter(s => s.strokeId === lastOp.strokeId);
     
     if (targetStrokes.length > 0) {
-        // Essential Deep Copy for shape fidelity
         const deepCopy = JSON.parse(JSON.stringify(targetStrokes));
         setRedoStack(prev => [...prev, { type: 'stroke', strokeId: lastOp.strokeId, segments: deepCopy }]);
         targetStrokes.forEach(seg => updates[seg.key] = null);
@@ -330,7 +328,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = currentColor;
         }
-        // STABLE START: beginPath once
         ctx.beginPath();
         ctx.moveTo(coords.x, coords.y);
     }
@@ -343,7 +340,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     
     const ctx = contextRef.current;
     if (ctx) {
-        // STABLE MOVE: Just lineTo and stroke, NO beginPath
         ctx.lineTo(coords.x, coords.y);
         ctx.stroke();
     }
@@ -403,10 +399,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
           <button 
             onClick={toggleFullscreen} 
-            className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl transition-all shadow-sm"
+            className="w-10 h-10 flex items-center justify-center bg-sky-50/50 hover:bg-sky-100/70 text-sky-600 rounded-xl transition-all shadow-sm shadow-sky-100"
             title="Tam Ekran"
           >
-            <span className="text-xl">🔳</span>
+            {isFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
           </button>
 
           <button 
