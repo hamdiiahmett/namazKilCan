@@ -236,14 +236,24 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   //  UNDO / REDO
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Sadece mevcut kullanıcının en son stroke'unu geri alır
   const handleUndo = async () => {
-    if (allSegments.length === 0) return;
-    const last    = allSegments[allSegments.length - 1];
-    const targets = allSegments.filter(s => s.strokeId === last.strokeId);
+    // currentUser'a ait segmentleri filtrele
+    const mySegments = allSegments.filter(s => (s.senderId || 'Anonim') === (currentUser || 'Anonim'));
+    if (mySegments.length === 0) return;
+
+    // Benim en son strokeId'mi bul
+    const myLast  = mySegments[mySegments.length - 1];
+    const lastSId = myLast.strokeId;
+
+    // O strokeId'ye ait TÜM segmentler (sadece benim olanlar)
+    const targets = allSegments.filter(
+      s => s.strokeId === lastSId && (s.senderId || 'Anonim') === (currentUser || 'Anonim')
+    );
     if (!targets.length) return;
 
     const deepCopy = JSON.parse(JSON.stringify(targets));
-    setRedoStack(prev => [...prev, { strokeId: last.strokeId, segments: deepCopy }]);
+    setRedoStack(prev => [...prev, { strokeId: lastSId, segments: deepCopy, type: 'stroke' }]);
 
     const updates = {};
     targets.forEach(s => { updates[s.key] = null; });
@@ -253,9 +263,20 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const handleRedo = async () => {
     if (!redoStack.length) return;
     const top = redoStack[redoStack.length - 1];
-    for (const seg of top.segments) {
-      const { key, ...clean } = seg;
-      await push(ref(rtdb, 'canvas/segments'), clean);
+
+    if (top.type === 'clear') {
+      // Clear redo: tüm segmentleri geri yükle (clear sentinel'siz)
+      await set(ref(rtdb, 'canvas/segments'), null);
+      for (const seg of top.segments) {
+        const { key, ...clean } = seg;
+        await push(ref(rtdb, 'canvas/segments'), clean);
+      }
+    } else {
+      // Normal stroke redo
+      for (const seg of top.segments) {
+        const { key, ...clean } = seg;
+        await push(ref(rtdb, 'canvas/segments'), clean);
+      }
     }
     setRedoStack(prev => prev.slice(0, -1));
   };
@@ -265,11 +286,14 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // ─────────────────────────────────────────────────────────────────────────
 
   const clearCanvas = useCallback(async () => {
-    if (!allSegments.length) return;
-    const deepCopy = JSON.parse(JSON.stringify(allSegments));
-    setRedoStack(prev => [...prev, { strokeId: '__clear__', segments: deepCopy }]);
+    // Silinecek gerçek segmentler (clear sentinel'ini hariç tut)
+    const realSegs = allSegments.filter(s => s.type !== 'clear');
+    if (!realSegs.length) return;
+    // Tüm canvas'ı redo stack'e yedekle
+    const deepCopy = JSON.parse(JSON.stringify(realSegs));
+    setRedoStack(prev => [...prev, { strokeId: '__clear__', type: 'clear', segments: deepCopy }]);
+    // Firebase'i tamamen temizle (clear sentinel YAZMA — redo bozulmasın)
     await set(ref(rtdb, 'canvas/segments'), null);
-    await push(ref(rtdb, 'canvas/segments'), { type: 'clear' });
   }, [allSegments]);
 
   const handleSendToChat = () => {
@@ -312,14 +336,16 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         senderId: currentUser || 'Anonim',
         timestamp: serverTimestamp(),
       });
-      setRedoStack([]);
+      // Yeni çizim: sadece BU kullanıcının redo geçmişini temizle
+      setRedoStack(prev => prev.filter(r => r.type === 'clear'));
       return;
     }
 
     isDrawingRef.current = true;
     strokeIdRef.current  = Math.random().toString(36).substring(7);
     pointsRef.current    = [coords];
-    setRedoStack([]);
+    // Yeni çizim: sadece BU kullanıcının stroke redo'sunu temizle (clear redo'yu koru)
+    setRedoStack(prev => prev.filter(r => r.type === 'clear'));
 
     const ctx = contextRef.current;
     if (!ctx) return;
@@ -373,10 +399,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           <span className="text-lg font-bold text-slate-700 tracking-tight">Çizim Alanı</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Undo / Redo */}
           <div className="flex gap-1 bg-slate-50/50 p-1 rounded-xl">
-            <button onClick={handleUndo} disabled={!allSegments.length}
+            <button onClick={handleUndo} disabled={!allSegments.some(s => (s.senderId || 'Anonim') === (currentUser || 'Anonim'))}
               className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 rounded-lg disabled:opacity-30 transition-all shadow-sm" title="Geri Al">
               <span className="text-xl">↩️</span>
             </button>
@@ -418,7 +444,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       </div>
 
       {/* ── Canvas ── */}
-      <div className={`relative w-full max-w-4xl bg-white rounded-[2.5rem] p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all ${isFullscreen ? 'flex-1 w-full max-w-none mb-24' : 'aspect-[4/3] sm:aspect-video'}`}>
+      <div className={`relative w-full max-w-4xl bg-white rounded-[2rem] sm:rounded-[2.5rem] p-3 sm:p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all ${isFullscreen ? 'flex-1 w-full max-w-none mb-24' : 'aspect-[4/3] sm:aspect-video'}`}>
         <canvas
           ref={canvasRef}
           onMouseDown={startDrawing}
@@ -433,13 +459,13 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       </div>
 
       {/* ── Toolbar ── */}
-      <div className={`mt-8 w-full max-w-md flex flex-col gap-5 p-6 bg-white rounded-[3rem] shadow-toolbar border border-slate-50 ${isFullscreen ? 'fixed bottom-8 z-[100000]' : ''}`}>
+      <div className={`mt-4 sm:mt-8 w-full max-w-md flex flex-col gap-3 sm:gap-5 p-4 sm:p-6 bg-white rounded-[2rem] sm:rounded-[3rem] shadow-toolbar border border-slate-50 ${isFullscreen ? 'fixed bottom-4 sm:bottom-8 z-[100000]' : ''}`}>
 
         {/* Row 1: Main colors + wheel */}
         <div className="flex items-center justify-center gap-3">
           {mainColors.map(c => (
             <button key={c} onClick={() => handlePaletteClick(c)}
-              className={`w-10 h-10 rounded-full transition-all border-4 ${currentColor === c ? 'border-indigo-400 scale-110 shadow-lg' : 'border-white hover:scale-105'}`}
+              className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all border-4 ${currentColor === c ? 'border-indigo-400 scale-110 shadow-lg' : 'border-white hover:scale-105'}`}
               style={{ backgroundColor: c }} />
           ))}
           <div className="w-px h-6 bg-slate-100 mx-1" />
