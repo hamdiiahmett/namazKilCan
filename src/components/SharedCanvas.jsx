@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { rtdb } from '../firebase';
-import { ref, onValue, push, set, serverTimestamp, remove } from 'firebase/database';
+import { ref, onValue, push, set, serverTimestamp, remove, update } from 'firebase/database';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PURE HELPERS
@@ -65,6 +65,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const isDrawingRef = useRef(false);
   const lastSyncTimeRef = useRef(0);
   const strokeIdRef = useRef(null);
+  const redrawRequestRef = useRef(null);
 
   // --- CONFIG / PALETTE ---
   const mainColors = ['#ff808b', '#3bc1fb', '#34d399', '#fbbd23', '#a78bfa', '#475569'];
@@ -83,7 +84,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- DERIVED ---
   const currentColor = slots[activeSlot] || '#000000';
 
-  // --- ULTIMATE CONTINUOUS PATH REDRAW LOGIC ---
+  // --- SIMPLE CONTINUOUS REDRAW LOGIC ---
 
   const drawStrokeGroup = useCallback((ctx, canvas, stroke) => {
     if (stroke.type === 'fill') {
@@ -98,15 +99,15 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         
         if (stroke.tool === 'eraser') {
             ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = stroke.size * 5; // Eraser a bit bigger for better UX
+            ctx.lineWidth = stroke.size * 5; 
         } else {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = stroke.color;
         }
 
-        // --- THE "FIX": ONE PATH PER STROKE ---
-        ctx.beginPath();
         const pts = stroke.points;
+        // --- STABLE & NATURAL ENGINE: Plain lineTo loop ---
+        ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (let i = 1; i < pts.length; i++) {
             ctx.lineTo(pts[i].x, pts[i].y);
@@ -116,70 +117,55 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   }, []);
 
   const redrawAll = useCallback((segments) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    
-    // 1. Prepare Main
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (redrawRequestRef.current) cancelAnimationFrame(redrawRequestRef.current);
 
-    // 2. Prepare Scratch
-    if (!offscreenRef.current) {
-        offscreenRef.current = document.createElement('canvas');
-    }
-    const offscreen = offscreenRef.current;
-    offscreen.width = canvas.width;
-    offscreen.height = canvas.height;
-    const octx = offscreen.getContext('2d', { willReadFrequently: true });
-
-    // 3. Process segments into grouped strokes
-    // Note: We MUST maintain alphabetical/chronological order by segment key
-    const userStrokeGroups = {};
-    
-    segments.forEach(seg => {
-        const uid = seg.senderId || 'Anonim';
-        if (!userStrokeGroups[uid]) userStrokeGroups[uid] = [];
+    redrawRequestRef.current = requestAnimationFrame(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
         
-        if (seg.type === 'fill') {
-            userStrokeGroups[uid].push({ ...seg });
-        } else if (seg.type === 'draw') {
-            let sGroup = userStrokeGroups[uid].find(g => g.strokeId === seg.strokeId && g.type === 'draw');
-            if (!sGroup) {
-                sGroup = { 
-                    type: 'draw', 
-                    strokeId: seg.strokeId, 
-                    tool: seg.tool, 
-                    color: seg.color, 
-                    size: seg.size, 
-                    points: [] 
-                };
-                userStrokeGroups[uid].push(sGroup);
-            }
-            // Collect points
-            if (seg.curve) {
-                sGroup.points.push(seg.start, seg.control, seg.end);
-            } else if (seg.p1 && seg.p2) {
-                sGroup.points.push(seg.p1, seg.p2);
-            }
-        }
-    });
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const userIds = Object.keys(userStrokeGroups);
-    const sortedIds = [
-        ...userIds.filter(id => id !== currentUser),
-        ...(userStrokeGroups[currentUser] ? [currentUser] : [])
-    ];
+        if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+        const offscreen = offscreenRef.current;
+        offscreen.width = canvas.width;
+        offscreen.height = canvas.height;
+        const octx = offscreen.getContext('2d', { willReadFrequently: true });
 
-    sortedIds.forEach(uid => {
-        octx.clearRect(0, 0, offscreen.width, offscreen.height);
-        octx.globalCompositeOperation = 'source-over';
-        userStrokeGroups[uid].forEach(stroke => {
-            drawStrokeGroup(octx, offscreen, stroke);
+        const userStrokeGroups = {};
+        segments.forEach(seg => {
+            const uid = seg.senderId || 'Anonim';
+            if (!userStrokeGroups[uid]) userStrokeGroups[uid] = [];
+            
+            if (seg.type === 'fill') {
+                userStrokeGroups[uid].push({ ...seg });
+            } else if (seg.type === 'draw') {
+                let sGroup = userStrokeGroups[uid].find(g => g.strokeId === seg.strokeId && g.type === 'draw');
+                if (!sGroup) {
+                    sGroup = { type: 'draw', strokeId: seg.strokeId, tool: seg.tool, color: seg.color, size: seg.size, points: [] };
+                    userStrokeGroups[uid].push(sGroup);
+                }
+                if (seg.curve) sGroup.points.push(seg.start, seg.control, seg.end);
+                else if (seg.p1 && seg.p2) sGroup.points.push(seg.p1, seg.p2);
+            }
         });
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.drawImage(offscreen, 0, 0);
+
+        const userIds = Object.keys(userStrokeGroups);
+        const sortedIds = [
+            ...userIds.filter(id => id !== currentUser),
+            ...(userStrokeGroups[currentUser] ? [currentUser] : [])
+        ];
+
+        // Layered Rendering (Eraser isolation)
+        sortedIds.forEach(uid => {
+            octx.clearRect(0, 0, offscreen.width, offscreen.height);
+            octx.globalCompositeOperation = 'source-over';
+            userStrokeGroups[uid].forEach(stroke => drawStrokeGroup(octx, offscreen, stroke));
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.drawImage(offscreen, 0, 0);
+        });
     });
   }, [currentUser, drawStrokeGroup]);
 
@@ -197,18 +183,18 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       const segmentsArray = [];
       if (data) {
         Object.keys(data).sort().forEach(key => {
-            if (data[key].type === 'clear') {
-                segmentsArray.length = 0;
-            } else {
-                segmentsArray.push({ ...data[key], key });
-            }
+            if (data[key].type === 'clear') segmentsArray.length = 0;
+            else segmentsArray.push({ ...data[key], key });
         });
       }
       setAllSegments(segmentsArray);
       redrawAll(segmentsArray);
     });
 
-    return () => unsubscribe();
+    return () => {
+        unsubscribe();
+        if (redrawRequestRef.current) cancelAnimationFrame(redrawRequestRef.current);
+    };
   }, [redrawAll]);
 
   // --- ACTIONS ---
@@ -219,27 +205,42 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     pointsRef.current = [];
   }, []);
 
-  // GLOBAL RELEASE HANDLER (BOUNDARY FIX)
   useEffect(() => {
     const handleGlobalUp = () => stopDrawing();
     window.addEventListener('mouseup', handleGlobalUp);
     window.addEventListener('touchend', handleGlobalUp, { passive: false });
+    
+    const fsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', fsChange);
+
     return () => {
       window.removeEventListener('mouseup', handleGlobalUp);
       window.removeEventListener('touchend', handleGlobalUp);
+      document.removeEventListener('fullscreenchange', fsChange);
     };
   }, [stopDrawing]);
 
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.();
+    } else {
+        document.exitFullscreen?.();
+    }
+  };
+
   const handleUndo = async () => {
-    const myStrokes = allSegments.filter(s => (s.senderId || 'Anonim') === currentUser);
-    if (myStrokes.length === 0) return;
-    const lastId = myStrokes[myStrokes.length - 1].strokeId;
-    const targetSegments = allSegments.filter(s => s.strokeId === lastId);
-    if (targetSegments.length > 0) {
-        setRedoStack(prev => [...prev, { strokeId: lastId, segments: targetSegments }]);
-        for (const seg of targetSegments) {
-            await remove(ref(rtdb, `canvas/segments/${seg.key}`));
-        }
+    if (allSegments.length === 0) return;
+    const lastOp = allSegments[allSegments.length - 1];
+    
+    const updates = {};
+    const targetStrokes = allSegments.filter(s => s.strokeId === lastOp.strokeId);
+    
+    if (targetStrokes.length > 0) {
+        // Essential Deep Copy for shape fidelity
+        const deepCopy = JSON.parse(JSON.stringify(targetStrokes));
+        setRedoStack(prev => [...prev, { type: 'stroke', strokeId: lastOp.strokeId, segments: deepCopy }]);
+        targetStrokes.forEach(seg => updates[seg.key] = null);
+        await update(ref(rtdb, 'canvas/segments'), updates);
     }
   };
 
@@ -264,11 +265,13 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     });
   };
 
-  const clearCanvas = useCallback(() => {
-    set(ref(rtdb, 'canvas/segments'), null);
-    push(ref(rtdb, 'canvas/segments'), { type: 'clear' });
-    setRedoStack([]);
-  }, []);
+  const clearCanvas = useCallback(async () => {
+    if (allSegments.length === 0) return;
+    const deepCopy = JSON.parse(JSON.stringify(allSegments));
+    setRedoStack(prev => [...prev, { type: 'clear', segments: deepCopy }]);
+    await set(ref(rtdb, 'canvas/segments'), null);
+    await push(ref(rtdb, 'canvas/segments'), { type: 'clear' });
+  }, [allSegments]);
 
   const getCoordinates = (e) => {
     const canvas = canvasRef.current;
@@ -289,7 +292,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
   const syncToFirebase = (seg) => {
     const now = Date.now();
-    if (now - lastSyncTimeRef.current < 20) return; // Faster sync frequency
+    if (now - lastSyncTimeRef.current < 50) return; 
     lastSyncTimeRef.current = now;
     push(ref(rtdb, 'canvas/segments'), { 
         ...seg, 
@@ -298,8 +301,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
         timestamp: serverTimestamp()
     });
   };
-
-  // --- LIVE DRAWING ENGINE ---
 
   const startDrawing = (e) => {
     const coords = getCoordinates(e);
@@ -317,7 +318,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     pointsRef.current = [coords];
     setRedoStack([]);
 
-    // Open high-perf continuous path locally
     const ctx = contextRef.current;
     if (ctx) {
         ctx.lineWidth = brushSize;
@@ -330,6 +330,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
             ctx.globalCompositeOperation = 'source-over';
             ctx.strokeStyle = currentColor;
         }
+        // STABLE START: beginPath once
         ctx.beginPath();
         ctx.moveTo(coords.x, coords.y);
     }
@@ -342,19 +343,15 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     
     const ctx = contextRef.current;
     if (ctx) {
-        // CONTINUOUS STEP: NO beginPath() here!
+        // STABLE MOVE: Just lineTo and stroke, NO beginPath
         ctx.lineTo(coords.x, coords.y);
         ctx.stroke();
     }
 
     const prev = pointsRef.current[pointsRef.current.length - 1];
     pointsRef.current.push(coords);
-    
-    // Immediate sync for multiplayer
     syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, p1: prev, p2: coords });
   };
-
-  // --- UI HELPERS ---
 
   const handlePaletteClick = (color) => {
     const nextSlots = [...slots];
@@ -371,10 +368,14 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   };
 
   return (
-    <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-50 bg-slate-900/95 backdrop-blur-md p-4' : 'relative'}`}>
+    <div 
+        className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-[99999] bg-slate-900/95 backdrop-blur-md p-4 pt-10' : 'relative'}`}
+    >
       
       {/* Header */}
-      <div className="w-full max-w-4xl flex justify-between items-center mb-4 px-4 h-16 bg-white/50 backdrop-blur-sm rounded-3xl">
+      <div 
+        className={`w-full max-w-4xl flex justify-between items-center mb-4 px-4 h-16 bg-white/50 backdrop-blur-sm rounded-3xl transition-all ${isFullscreen ? 'fixed top-4 left-4 right-4 z-[100000] max-w-none' : ''}`}
+      >
         <div className="flex items-center gap-3">
           <span className="text-2xl">🎨</span>
           <span className="text-lg font-bold text-slate-700 tracking-tight">Çizim Alanı</span>
@@ -384,7 +385,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           <div className="flex gap-1 bg-slate-50/50 p-1 rounded-xl">
             <button 
                 onClick={handleUndo} 
-                disabled={allSegments.filter(s => (s.senderId || 'Anonim') === currentUser).length === 0}
+                disabled={allSegments.length === 0}
                 className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 text-slate-400 rounded-lg disabled:opacity-30 transition-all shadow-sm"
                 title="Geri Al"
             >
@@ -401,12 +402,21 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           </div>
 
           <button 
+            onClick={toggleFullscreen} 
+            className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl transition-all shadow-sm"
+            title="Tam Ekran"
+          >
+            <span className="text-xl">🔳</span>
+          </button>
+
+          <button 
             onClick={handleSendToChat} 
             className="w-10 h-10 flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-500 rounded-xl transition-all shadow-sm shadow-sky-100"
             title="Sohbete Gönder"
           >
             <span className="text-xl">✈️</span>
           </button>
+          
           <button 
             onClick={clearCanvas} 
             className="w-10 h-10 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-400 rounded-xl transition-all"
@@ -418,23 +428,24 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       </div>
 
       {/* Canvas Area with Dashed Border */}
-      <div className="relative w-full max-w-4xl aspect-[4/3] sm:aspect-video bg-white rounded-[2.5rem] p-6 shadow-xl-soft border-2 border-dashed border-slate-200 shadow-canvas">
+      <div className={`relative w-full max-w-4xl bg-white rounded-[2.5rem] p-6 shadow-xl-soft border-2 border-dashed border-slate-200 shadow-canvas transition-all ${isFullscreen ? 'flex-1 w-full max-w-none' : 'aspect-[4/3] sm:aspect-video'}`}>
         <canvas
           ref={canvasRef}
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
-          // Removed stop on boundary check to allow global handler to catch it
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
           className="w-full h-full block cursor-crosshair rounded-[2rem]"
-          style={{ touchAction: 'none' }} // STOPS SCREEN SCROLLING
+          style={{ touchAction: 'none' }} 
         />
       </div>
 
       {/* 3-Row Toolbar */}
-      <div className="mt-8 w-full max-w-md flex flex-col gap-5 p-6 bg-white rounded-[3rem] shadow-toolbar border border-slate-50">
+      <div 
+        className={`mt-8 w-full max-w-md flex flex-col gap-5 p-6 bg-white rounded-[3rem] shadow-toolbar border border-slate-50 transition-all ${isFullscreen ? 'fixed bottom-8 z-[100000]' : ''}`}
+      >
         
         {/* Row 1: Fixed Colors + Wheel */}
         <div className="flex items-center justify-center gap-3">
