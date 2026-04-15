@@ -65,6 +65,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const isDrawingRef = useRef(false);
   const lastSyncTimeRef = useRef(0);
   const strokeIdRef = useRef(null);
+  const lastPosRef = useRef(null); // Tracking position for continuous local path
 
   // --- CONFIG / PALETTE ---
   const mainColors = ['#ff808b', '#3bc1fb', '#34d399', '#fbbd23', '#a78bfa', '#475569'];
@@ -83,33 +84,34 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   // --- DERIVED ---
   const currentColor = slots[activeSlot] || '#000000';
 
-  // --- PÜRÜZSÜZLEŞTİRME (SMOOTHING) LOGIC ---
+  // --- CONTINUOUS PATH REDRAW LOGIC ---
 
-  const drawSegment = useCallback((ctx, canvas, data) => {
-    if (data.type === 'fill') {
-        runFloodFill(ctx, canvas, data.x, data.y, data.color);
+  const drawStrokeGroup = useCallback((ctx, canvas, stroke) => {
+    if (stroke.type === 'fill') {
+        runFloodFill(ctx, canvas, stroke.x, stroke.y, stroke.color);
         return;
     }
-    if (data.type === 'draw') {
-        ctx.lineWidth = data.size;
+    
+    if (stroke.type === 'draw' && stroke.points && stroke.points.length > 0) {
+        ctx.lineWidth = stroke.size;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        if (data.tool === 'eraser') {
+        
+        if (stroke.tool === 'eraser') {
             ctx.globalCompositeOperation = 'destination-out';
-            ctx.lineWidth = data.size * 4;
+            ctx.lineWidth = stroke.size * 5;
         } else {
             ctx.globalCompositeOperation = 'source-over';
-            ctx.strokeStyle = data.color;
+            ctx.strokeStyle = stroke.color;
         }
+
         ctx.beginPath();
-        if (data.curve) {
-            // Quadratic Bezier Smoothing
-            ctx.moveTo(data.start.x, data.start.y);
-            ctx.quadraticCurveTo(data.control.x, data.control.y, data.end.x, data.end.y);
-        } else {
-            // Simple Line
-            ctx.moveTo(data.p1.x, data.p1.y);
-            ctx.lineTo(data.p2.x, data.p2.y);
+        const pts = stroke.points;
+        ctx.moveTo(pts[0].x, pts[0].y);
+        
+        // Connect all points in a single continuous path
+        for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x, pts[i].y);
         }
         ctx.stroke();
     }
@@ -132,30 +134,58 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     offscreen.height = canvas.height;
     const octx = offscreen.getContext('2d', { willReadFrequently: true });
 
-    const grouped = segments.reduce((acc, seg) => {
+    // 1. Group individual segments into continuous strokes
+    // We maintain chronological order by user layers
+    const userStrokeGroups = {};
+    
+    segments.forEach(seg => {
         const uid = seg.senderId || 'Anonim';
-        if (!acc[uid]) acc[uid] = [];
-        acc[uid].push(seg);
-        return acc;
-    }, {});
+        if (!userStrokeGroups[uid]) userStrokeGroups[uid] = [];
+        
+        if (seg.type === 'fill') {
+            userStrokeGroups[uid].push({ ...seg });
+        } else if (seg.type === 'draw') {
+            // Find or create the stroke for this strokeId
+            let existingStroke = userStrokeGroups[uid].find(s => s.strokeId === seg.strokeId);
+            if (!existingStroke) {
+                existingStroke = { 
+                    type: 'draw', 
+                    strokeId: seg.strokeId, 
+                    tool: seg.tool, 
+                    color: seg.color, 
+                    size: seg.size, 
+                    points: [] 
+                };
+                userStrokeGroups[uid].push(existingStroke);
+            }
+            
+            // Extract points from segment data
+            if (seg.curve) {
+                existingStroke.points.push(seg.start, seg.control, seg.end);
+            } else if (seg.p1 && seg.p2) {
+                existingStroke.points.push(seg.p1, seg.p2);
+            }
+        }
+    });
 
-    const userIds = Object.keys(grouped);
+    const userIds = Object.keys(userStrokeGroups);
     const sortedIds = [
         ...userIds.filter(id => id !== currentUser),
-        ...(grouped[currentUser] ? [currentUser] : [])
+        ...(userStrokeGroups[currentUser] ? [currentUser] : [])
     ];
 
     sortedIds.forEach(uid => {
         octx.clearRect(0, 0, offscreen.width, offscreen.height);
         octx.globalCompositeOperation = 'source-over';
-        grouped[uid].forEach(seg => {
-            if (seg.type === 'clear') return;
-            drawSegment(octx, offscreen, seg);
+        
+        userStrokeGroups[uid].forEach(stroke => {
+            drawStrokeGroup(octx, offscreen, stroke);
         });
+        
         ctx.globalCompositeOperation = 'source-over';
         ctx.drawImage(offscreen, 0, 0);
     });
-  }, [currentUser, drawSegment]);
+  }, [currentUser, drawStrokeGroup]);
 
   // --- FIREBASE SYNC ---
   useEffect(() => {
@@ -258,31 +288,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     });
   };
 
-  const drawLocalCurve = (start, control, end, isSync = true) => {
-    const ctx = contextRef.current;
-    if (!ctx) return;
-    
-    ctx.lineWidth = brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    if (tool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = brushSize * 4;
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = currentColor;
-    }
-    
-    ctx.beginPath();
-    ctx.moveTo(start.x, start.y);
-    ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
-    ctx.stroke();
-
-    if (isSync) {
-      syncToFirebase({ type: 'draw', tool, color: currentColor, size: brushSize, curve: true, start, control, end });
-    }
-  };
-
   const drawLocalLine = (p1, p2, isSync = true) => {
     const ctx = contextRef.current;
     if (!ctx) return;
@@ -290,14 +295,16 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    
     if (tool === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out';
-        ctx.lineWidth = brushSize * 4;
+        ctx.lineWidth = brushSize * 5;
     } else {
         ctx.globalCompositeOperation = 'source-over';
         ctx.strokeStyle = currentColor;
     }
 
+    // Connect points using a simple but continuous line
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y);
     ctx.lineTo(p2.x, p2.y);
@@ -314,9 +321,9 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
     pointsRef.current = [];
+    lastPosRef.current = null;
   }, []);
 
-  // Global mouse/touch release
   useEffect(() => {
     const handleGlobalUp = () => stopDrawing();
     window.addEventListener('mouseup', handleGlobalUp);
@@ -330,15 +337,18 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
   const startDrawing = (e) => {
     const coords = getCoordinates(e);
     if (!coords) return;
+    
     if (tool === 'fill') {
       const fillData = { type: 'fill', x: coords.x, y: coords.y, color: currentColor, strokeId: Math.random().toString(36).substring(7), senderId: currentUser || 'Anonim' };
       push(ref(rtdb, 'canvas/segments'), fillData);
       setRedoStack([]);
       return;
     }
+    
     isDrawingRef.current = true;
     strokeIdRef.current = Math.random().toString(36).substring(7);
     pointsRef.current = [coords];
+    lastPosRef.current = coords;
     setRedoStack([]);
   };
 
@@ -347,29 +357,12 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     const coords = getCoordinates(e);
     if (!coords) return;
     
-    const pts = pointsRef.current;
-    pts.push(coords);
-    
-    const len = pts.length;
-    if (len === 2) {
-      drawLocalLine(pts[0], pts[1]);
-    } else if (len >= 3) {
-      const pPrev = pts[len - 3];
-      const pCurr = pts[len - 2];
-      const pNext = pts[len - 1];
-      
-      const start = {
-        x: (pPrev.x + pCurr.x) / 2,
-        y: (pPrev.y + pCurr.y) / 2
-      };
-      const control = pCurr;
-      const end = {
-        x: (pCurr.x + pNext.x) / 2,
-        y: (pCurr.y + pNext.y) / 2
-      };
-      
-      drawLocalCurve(start, control, end);
+    const prev = lastPosRef.current;
+    if (prev) {
+        drawLocalLine(prev, coords);
     }
+    lastPosRef.current = coords;
+    pointsRef.current.push(coords);
   };
 
   const handlePaletteClick = (color) => {
@@ -440,7 +433,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
-          // Removed stopDrawing on boundary to support continuous drawing
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
