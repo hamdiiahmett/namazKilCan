@@ -310,6 +310,23 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
 
   // --- HANDLERS ---
 
+  const stopDrawing = useCallback(() => {
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
+    pointsRef.current = [];
+  }, []);
+
+  // Global mouse/touch release
+  useEffect(() => {
+    const handleGlobalUp = () => stopDrawing();
+    window.addEventListener('mouseup', handleGlobalUp);
+    window.addEventListener('touchend', handleGlobalUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalUp);
+      window.removeEventListener('touchend', handleGlobalUp);
+    };
+  }, [stopDrawing]);
+
   const startDrawing = (e) => {
     const coords = getCoordinates(e);
     if (!coords) return;
@@ -335,10 +352,8 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
     
     const len = pts.length;
     if (len === 2) {
-      // First tiny segment - just a line
       drawLocalLine(pts[0], pts[1]);
     } else if (len >= 3) {
-      // Smoothing: Midpoint logic
       const pPrev = pts[len - 3];
       const pCurr = pts[len - 2];
       const pNext = pts[len - 1];
@@ -355,12 +370,6 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
       
       drawLocalCurve(start, control, end);
     }
-  };
-
-  const stopDrawing = () => {
-    if (!isDrawingRef.current) return;
-    isDrawingRef.current = false;
-    pointsRef.current = [];
   };
 
   const handlePaletteClick = (color) => {
@@ -431,7 +440,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser }) {
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
-          onMouseOut={stopDrawing}
+          // Removed stopDrawing on boundary to support continuous drawing
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
