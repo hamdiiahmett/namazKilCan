@@ -1,6 +1,23 @@
 @import "tailwindcss";
 
-/* 🚀 Viewport & Keyboard Bounce Fix */
+/* ── Design Tokens ─────────────────────────────────────────── */
+:root {
+  --color-primary: #ec4899;
+  --color-primary-light: #fce7f3;
+  --color-primary-dark: #db2777;
+  --color-secondary: #38bdf8;
+  --color-secondary-light: #e0f2fe;
+  --color-accent: #f59e0b;
+  --color-accent-light: #fef3c7;
+  --color-bg: #fdf2f8;
+  --color-bg-card: #ffffff;
+  --color-text: #1e293b;
+  --color-text-muted: #94a3b8;
+  --color-border: #fce7f3;
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── Base Reset & Viewport ─────────────────────────────────── */
 html, body {
   height: 100dvh;
   margin: 0;
@@ -10,9 +27,164 @@ html, body {
   width: 100%;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+  font-family: var(--font-family);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
   height: 100%;
   width: 100%;
+}
+
+/* ── Custom Scrollbar ──────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #f9a8d4;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #f472b6;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #f9a8d4 transparent;
+}
+
+/* ── Floating Flower Petals Animation ──────────────────────── */
+@keyframes float-petal {
+  0% {
+    transform: translateY(0) rotate(0deg) scale(1);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(-100vh) rotate(360deg) scale(0.5);
+    opacity: 0;
+  }
+}
+
+@keyframes sway {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(20px); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes bounce-in {
+  0% { transform: scale(0.8); opacity: 0; }
+  60% { transform: scale(1.05); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Utility animation classes */
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-shimmer {
+  background-size: 200% auto;
+  animation: shimmer 3s linear infinite;
+}
+
+/* ── Flower Petal Decorative Elements ──────────────────────── */
+.petal {
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  font-size: 1.2rem;
+  animation: float-petal 12s ease-in-out infinite;
+}
+
+.petal:nth-child(1) { left: 10%; animation-delay: 0s; animation-duration: 14s; }
+.petal:nth-child(2) { left: 25%; animation-delay: 3s; animation-duration: 11s; }
+.petal:nth-child(3) { left: 50%; animation-delay: 6s; animation-duration: 16s; }
+.petal:nth-child(4) { left: 70%; animation-delay: 2s; animation-duration: 13s; }
+.petal:nth-child(5) { left: 85%; animation-delay: 8s; animation-duration: 15s; }
+.petal:nth-child(6) { left: 40%; animation-delay: 5s; animation-duration: 12s; }
+
+/* ── Glassmorphism Utility ─────────────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* ── Selection ─────────────────────────────────────────────── */
+::selection {
+  background: #fce7f3;
+  color: #9d174d;
+}
+
+/* ── Range Input (Canvas Brush Slider) ─────────────────────── */
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f472b6, #ec4899);
+  box-shadow: 0 2px 10px rgba(244, 114, 182, 0.4);
+  cursor: pointer;
+  border: 3px solid white;
+  transition: all 0.2s;
+}
+
+input[type=range]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type=range]::-moz-range-thumb {
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f472b6, #ec4899);
+  box-shadow: 0 2px 10px rgba(244, 114, 182, 0.4);
+  cursor: pointer;
+  border: 3px solid white;
 }

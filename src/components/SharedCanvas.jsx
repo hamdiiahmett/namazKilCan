@@ -1,6 +1,18 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onValue, push, set, serverTimestamp, update } from 'firebase/database';
+import {
+  Pencil, Eraser, PaintBucket, Undo2, Redo2,
+  Maximize2, Minimize2, Send, Trash2,
+  ChevronUp, ChevronDown, Palette,
+} from 'lucide-react';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CANVAS_W = 1600;
+const CANVAS_H = 1200;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PURE HELPERS
@@ -61,7 +73,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
   const canvasRef      = useRef(null);
   const offscreenRef   = useRef(null);
   const contextRef     = useRef(null);
-  const pointsRef      = useRef([]);        // live stroke points (never pushed to firebase mid-stroke)
+  const pointsRef      = useRef([]);        // live stroke points
   const isDrawingRef   = useRef(false);
   const strokeIdRef    = useRef(null);
   const redrawRafRef   = useRef(null);
@@ -83,6 +95,25 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
   useEffect(() => { segmentsRef.current = allSegments; }, [allSegments]);
 
   const currentColor = slots[activeSlot] || '#000000';
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  OFFSCREEN CANVAS — created once, reused
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const ensureOffscreen = useCallback(() => {
+    if (!offscreenRef.current) {
+      const off = document.createElement('canvas');
+      off.width  = CANVAS_W;
+      off.height = CANVAS_H;
+      offscreenRef.current = off;
+    }
+    const off = offscreenRef.current;
+    if (off.width !== CANVAS_W || off.height !== CANVAS_H) {
+      off.width  = CANVAS_W;
+      off.height = CANVAS_H;
+    }
+    return off;
+  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   //  REDRAW: layered rendering so each user's eraser is isolated
@@ -117,15 +148,12 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
       const ctx = canvas.getContext('2d');
 
       // White background
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-      // Offscreen scratch canvas (isolates each user's eraser)
-      if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
-      const off  = offscreenRef.current;
-      off.width  = canvas.width;
-      off.height = canvas.height;
+      // Cached offscreen scratch canvas (isolates each user's eraser)
+      const off = ensureOffscreen();
       const oc = off.getContext('2d', { willReadFrequently: true });
 
       // Group segments → strokes per user
@@ -162,7 +190,7 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
         ctx.drawImage(off, 0, 0);
       });
     });
-  }, [currentUser, drawOneStroke]);
+  }, [currentUser, drawOneStroke, ensureOffscreen]);
 
   // ─────────────────────────────────────────────────────────────────────────
   //  FIREBASE SYNC (read)
@@ -171,8 +199,10 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width  = canvas.offsetWidth  * 2;
-    canvas.height = canvas.offsetHeight * 2;
+
+    // FIXED internal resolution — never changes
+    canvas.width  = CANVAS_W;
+    canvas.height = CANVAS_H;
     contextRef.current = canvas.getContext('2d', { willReadFrequently: true });
 
     const segRef = ref(rtdb, 'canvas/segments');
@@ -242,29 +272,8 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
     });
   };
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let resizeTimer;
-    const observer = new ResizeObserver(() => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        const targetW = canvas.offsetWidth * 2;
-        const targetH = canvas.offsetHeight * 2;
-        if ((canvas.width !== targetW || canvas.height !== targetH) && targetW > 0 && targetH > 0) {
-          canvas.width = targetW;
-          canvas.height = targetH;
-          contextRef.current = canvas.getContext('2d', { willReadFrequently: true });
-          redrawAll(segmentsRef.current);
-        }
-      }, 200);
-    });
-    observer.observe(canvas);
-    return () => {
-      observer.disconnect();
-      clearTimeout(resizeTimer);
-    };
-  }, [redrawAll]);
+  // No ResizeObserver needed — canvas resolution is fixed at CANVAS_W×CANVAS_H.
+  // CSS handles visual scaling via w-full/h-full + object-contain on the canvas.
 
   // ─────────────────────────────────────────────────────────────────────────
   //  UNDO / REDO
@@ -349,8 +358,8 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect   = canvas.getBoundingClientRect();
-    const scaleX = canvas.width  / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const scaleX = CANVAS_W / rect.width;
+    const scaleY = CANVAS_H / rect.height;
     const src    = e.touches?.[0] ?? e;
     return {
       x: (src.clientX - rect.left) * scaleX,
@@ -420,66 +429,110 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
   };
 
   // ─────────────────────────────────────────────────────────────────────────
+  //  DERIVED
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const hasMySegments = allSegments.some(s => (s.senderId || 'Anonim') === (currentUser || 'Anonim'));
+  const hasRedo       = redoStack.length > 0;
+
+  // ─────────────────────────────────────────────────────────────────────────
   //  RENDER
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className={`flex flex-col items-center w-full transition-all duration-300 ${isFullscreen ? 'fixed inset-0 z-[9999] bg-white pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] px-4 sm:px-6 overflow-hidden' : 'relative'}`}>
-
+    <div
+      className={`flex flex-col items-center w-full transition-all duration-300 ${
+        isFullscreen
+          ? 'fixed inset-0 z-[9999] bg-gradient-to-b from-rose-50/60 via-white to-sky-50/40 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] px-4 sm:px-6 overflow-hidden'
+          : 'relative'
+      }`}
+    >
+      {isFullscreen && (
+        <button
+          onClick={toggleFullscreen}
+          className="absolute top-[calc(0.5rem+env(safe-area-inset-top))] right-4 z-[10005] w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 text-sky-500 rounded-full shadow-lg border border-slate-100 transition-transform active:scale-90"
+          title="Tam Ekrandan Çık"
+        >
+          <Minimize2 className="w-5 h-5" />
+        </button>
+      )}
       {/* ── Header ── */}
-      <div className={`w-full max-w-4xl flex justify-between items-center bg-white/50 backdrop-blur-sm rounded-3xl transition-all z-[10000] flex-shrink-0 ${isFullscreen ? 'h-16 px-4 shadow-sm border border-slate-100' : 'mb-4 px-4 h-16 relative'}`}>
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">🎨</span>
-          <span className="text-lg font-bold text-slate-700 tracking-tight">Çizim Alanı</span>
+      <div
+        className={`w-full max-w-4xl flex justify-between items-center rounded-3xl transition-all z-[10000] flex-shrink-0 ${
+          isFullscreen
+            ? 'h-14 px-4 shadow-sm border border-pink-100/60 bg-white/70 backdrop-blur-md'
+            : 'mb-4 px-4 h-14 relative bg-white/50 backdrop-blur-sm'
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-pink-400 to-rose-300 flex items-center justify-center shadow-sm">
+            <Palette className="w-4 h-4 text-white" />
+          </div>
+          <span className="text-base font-bold bg-gradient-to-r from-pink-500 to-rose-400 bg-clip-text text-transparent tracking-tight">
+            Çizim Alanı
+          </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           {/* Undo / Redo */}
-          <div className="flex gap-1 bg-slate-50/50 p-1 rounded-xl">
-            <button onClick={handleUndo} disabled={!allSegments.some(s => (s.senderId || 'Anonim') === (currentUser || 'Anonim'))}
-              className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 rounded-lg disabled:opacity-30 transition-all shadow-sm" title="Geri Al">
-              <span className="text-xl">↩️</span>
+          <div className="flex gap-0.5 bg-slate-50/80 p-0.5 rounded-xl">
+            <button
+              onClick={handleUndo}
+              disabled={!hasMySegments}
+              className="w-9 h-9 flex items-center justify-center bg-white hover:bg-pink-50 rounded-lg disabled:opacity-25 transition-all shadow-sm border border-slate-100/60"
+              title="Geri Al"
+            >
+              <Undo2 className="w-4 h-4 text-slate-500" />
             </button>
-            <button onClick={handleRedo} disabled={!redoStack.length}
-              className="w-10 h-10 flex items-center justify-center bg-white hover:bg-slate-50 rounded-lg disabled:opacity-30 transition-all shadow-sm" title="İleri Al">
-              <span className="text-xl">↪️</span>
+            <button
+              onClick={handleRedo}
+              disabled={!hasRedo}
+              className="w-9 h-9 flex items-center justify-center bg-white hover:bg-pink-50 rounded-lg disabled:opacity-25 transition-all shadow-sm border border-slate-100/60"
+              title="İleri Al"
+            >
+              <Redo2 className="w-4 h-4 text-slate-500" />
             </button>
           </div>
 
           {/* Fullscreen */}
-          <button onClick={toggleFullscreen}
-            className="w-10 h-10 flex items-center justify-center bg-sky-50/80 hover:bg-sky-100 text-sky-600 rounded-xl transition-all shadow-sm"
-            title="Tam Ekran">
-            {isFullscreen ? (
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/>
-                <path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>
-                <path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>
-              </svg>
-            )}
-          </button>
+          {!isFullscreen && (
+            <button
+              onClick={toggleFullscreen}
+              className="w-9 h-9 flex items-center justify-center bg-sky-50/80 hover:bg-sky-100 text-sky-500 rounded-xl transition-all shadow-sm border border-sky-100/60"
+              title="Tam Ekran"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Send to chat */}
-          <button onClick={handleSendToChat}
-            className="w-10 h-10 flex items-center justify-center bg-sky-50 hover:bg-sky-100 text-sky-500 rounded-xl transition-all shadow-sm" title="Sohbete Gönder">
-            <span className="text-xl">✈️</span>
+          <button
+            onClick={handleSendToChat}
+            className="w-9 h-9 flex items-center justify-center bg-sky-50/80 hover:bg-sky-100 text-sky-400 rounded-xl transition-all shadow-sm border border-sky-100/60"
+            title="Sohbete Gönder"
+          >
+            <Send className="w-4 h-4" />
           </button>
 
           {/* Clear */}
-          <button onClick={clearCanvas}
-            className="w-10 h-10 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-400 rounded-xl transition-all" title="Temizle">
-            <span className="text-xl">🗑️</span>
+          <button
+            onClick={clearCanvas}
+            className="w-9 h-9 flex items-center justify-center bg-rose-50/80 hover:bg-rose-100 text-rose-400 rounded-xl transition-all border border-rose-100/60"
+            title="Temizle"
+          >
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
 
       {/* ── Canvas ── */}
-      <div 
-        className={`w-full max-w-4xl bg-white rounded-[2rem] sm:rounded-[2.5rem] p-3 sm:p-6 border-2 border-dashed border-slate-200 shadow-xl-soft transition-all duration-300 flex flex-col ${isFullscreen ? 'flex-1 min-h-0 my-4' : 'relative aspect-[4/3] sm:aspect-video'}`}
+      <div
+        className={`w-full max-w-4xl rounded-[2rem] sm:rounded-[2.5rem] p-3 sm:p-5 border-2 border-dashed border-pink-100/60 transition-all duration-300 flex flex-col bg-white ${
+          isFullscreen
+            ? 'flex-1 min-h-0 my-3'
+            : 'relative aspect-[4/3] sm:aspect-video'
+        }`}
+        style={{ boxShadow: '0 20px 60px -15px rgba(244,114,182,0.08)' }}
       >
         <div className="flex-1 w-full relative min-h-0">
           <canvas
@@ -490,89 +543,181 @@ const SharedCanvas = memo(function SharedCanvas({ currentUser, onFullscreenChang
             onTouchStart={startDrawing}
             onTouchMove={draw}
             onTouchEnd={stopDrawing}
-            className="absolute inset-0 w-full h-full cursor-crosshair rounded-[1rem] sm:rounded-[1.5rem]"
-            style={{ touchAction: 'none' }}
+            className="absolute inset-0 w-full h-full rounded-[1rem] sm:rounded-[1.5rem]"
+            style={{
+              touchAction: 'none',
+              cursor: tool === 'fill' ? 'crosshair' : tool === 'eraser' ? 'cell' : 'crosshair',
+            }}
           />
         </div>
       </div>
 
       {/* ── Toolbar ── */}
-      <div className={`w-full max-w-md flex flex-col items-center bg-white rounded-[2rem] sm:rounded-[3rem] shadow-toolbar border border-slate-50 transition-all duration-300 z-[10000] flex-shrink-0 ${isFullscreen ? 'mb-2' : 'mt-4 sm:mt-8 relative'}`}>
-        
+      <div
+        className={`w-full max-w-md flex flex-col items-center bg-white/90 backdrop-blur-sm rounded-[2rem] sm:rounded-[3rem] border border-pink-100/50 transition-all duration-300 z-[10000] flex-shrink-0 ${
+          isFullscreen ? 'mb-2' : 'mt-4 sm:mt-8 relative'
+        }`}
+        style={{ boxShadow: '0 10px 40px -10px rgba(244,114,182,0.12)' }}
+      >
         {/* Toggle Button */}
-        <button 
+        <button
           onClick={() => setIsToolbarOpen(!isToolbarOpen)}
-          className="w-full h-8 flex items-center justify-center hover:bg-slate-50/50 rounded-t-[2rem] sm:rounded-t-[3rem] transition-colors group cursor-pointer"
-          title={isToolbarOpen ? "Araçları Gizle" : "Araçları Göster"}
+          className="w-full h-8 flex items-center justify-center hover:bg-pink-50/40 rounded-t-[2rem] sm:rounded-t-[3rem] transition-colors group cursor-pointer"
+          title={isToolbarOpen ? 'Araçları Gizle' : 'Araçları Göster'}
         >
-          <div className={`w-12 h-1.5 bg-slate-200 group-hover:bg-slate-300 rounded-full transition-transform duration-300 ${isToolbarOpen ? '' : 'translate-y-0.5'}`} />
+          {isToolbarOpen
+            ? <ChevronDown className="w-4 h-4 text-slate-300 group-hover:text-pink-400 transition-colors" />
+            : <ChevronUp className="w-4 h-4 text-slate-300 group-hover:text-pink-400 transition-colors" />
+          }
         </button>
 
-        <div className={`w-full flex justify-center transition-all duration-300 overflow-hidden ${isToolbarOpen ? 'max-h-[30rem] opacity-100 pb-4 sm:pb-6' : 'max-h-0 opacity-0 pb-0'}`}>
+        <div
+          className={`w-full flex justify-center transition-all duration-300 overflow-hidden ${
+            isToolbarOpen ? 'max-h-[30rem] opacity-100 pb-4 sm:pb-6' : 'max-h-0 opacity-0 pb-0'
+          }`}
+        >
           <div className="flex flex-col gap-3 sm:gap-5 px-4 sm:px-6 w-full items-center">
-            {/* Row 1: Main colors + wheel */}
-            <div className="flex items-center justify-center gap-3">
+            {/* Row 1: Tool buttons */}
+            <div className="flex items-center justify-center gap-1.5">
+              <button
+                onClick={() => setTool('pencil')}
+                className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
+                  tool === 'pencil'
+                    ? 'bg-gradient-to-br from-pink-400 to-rose-400 text-white scale-110 shadow-md shadow-pink-200/50'
+                    : 'bg-slate-50 text-slate-400 hover:bg-pink-50 hover:text-pink-400'
+                }`}
+                title="Kalem"
+              >
+                <Pencil className="w-4.5 h-4.5" />
+              </button>
+              <button
+                onClick={() => setTool('fill')}
+                className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
+                  tool === 'fill'
+                    ? 'bg-gradient-to-br from-pink-400 to-rose-400 text-white scale-110 shadow-md shadow-pink-200/50'
+                    : 'bg-slate-50 text-slate-400 hover:bg-pink-50 hover:text-pink-400'
+                }`}
+                title="Boya Kovası"
+              >
+                <PaintBucket className="w-4.5 h-4.5" />
+              </button>
+              <button
+                onClick={() => setTool('eraser')}
+                className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all ${
+                  tool === 'eraser'
+                    ? 'bg-gradient-to-br from-pink-400 to-rose-400 text-white scale-110 shadow-md shadow-pink-200/50'
+                    : 'bg-slate-50 text-slate-400 hover:bg-pink-50 hover:text-pink-400'
+                }`}
+                title="Silgi"
+              >
+                <Eraser className="w-4.5 h-4.5" />
+              </button>
+            </div>
+
+            {/* Row 2: Main colors + wheel */}
+            <div className="flex items-center justify-center gap-2.5">
               {mainColors.map(c => (
-                <button key={c} onClick={() => handlePaletteClick(c)}
-                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all border-4 ${currentColor === c ? 'border-indigo-400 scale-110 shadow-lg' : 'border-white hover:scale-105'}`}
-                  style={{ backgroundColor: c }} />
+                <button
+                  key={c}
+                  onClick={() => handlePaletteClick(c)}
+                  className={`w-7 h-7 sm:w-9 sm:h-9 rounded-full transition-all ${
+                    currentColor === c
+                      ? 'ring-2 ring-offset-2 ring-pink-400 scale-110 shadow-lg'
+                      : 'ring-2 ring-white hover:scale-105 shadow-sm'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
               ))}
-              <div className="w-px h-6 bg-slate-100 mx-1" />
-              <div className="relative w-10 h-10 rounded-full overflow-hidden border-4 border-white shadow-sm hover:scale-110 transition-all ring-2 ring-slate-100"
-                style={{ background: 'conic-gradient(from 180deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)' }}>
-                <input type="color" value={currentColor} onChange={e => handleWheelChange(e.target.value)}
-                  className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0" />
+              <div className="w-px h-6 bg-slate-100 mx-0.5" />
+              <div
+                className="relative w-9 h-9 rounded-full overflow-hidden shadow-sm hover:scale-110 transition-all ring-2 ring-slate-100"
+                style={{ background: 'conic-gradient(from 180deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)' }}
+              >
+                <input
+                  type="color"
+                  value={currentColor}
+                  onChange={e => handleWheelChange(e.target.value)}
+                  className="absolute inset-[-50%] w-[200%] h-[200%] cursor-pointer opacity-0"
+                />
               </div>
             </div>
 
-            {/* Row 2: Slots + tools */}
-            <div className="flex items-center justify-center gap-5">
+            {/* Row 3: Slots */}
+            <div className="flex items-center justify-center gap-4">
               <div className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 rounded-2xl">
                 {slots.map((c, i) => (
-                  <button key={i} onClick={() => setActiveSlot(i)}
-                    className={`w-8 h-8 rounded-full transition-all border-4 ${activeSlot === i ? 'border-indigo-400 scale-125 shadow-md z-10' : 'border-white opacity-40 hover:opacity-100'}`}
-                    style={{ backgroundColor: c }} />
+                  <button
+                    key={i}
+                    onClick={() => setActiveSlot(i)}
+                    className={`w-7 h-7 rounded-full transition-all ${
+                      activeSlot === i
+                        ? 'ring-2 ring-offset-2 ring-pink-400 scale-125 shadow-md z-10'
+                        : 'ring-2 ring-white opacity-40 hover:opacity-100'
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
                 ))}
-              </div>
-              <div className="w-px h-8 bg-slate-200" />
-              <div className="flex items-center gap-3">
-                <button onClick={() => setTool('fill')}
-                  className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'fill' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                  title="Boya Kovası">
-                  <span className="text-2xl">🪣</span>
-                </button>
-                <button onClick={() => setTool('eraser')}
-                  className={`w-12 h-12 flex items-center justify-center rounded-2xl transition-all ${tool === 'eraser' ? 'bg-indigo-50 text-indigo-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                  title="Silgi">
-                  <span className="text-2xl">🧼</span>
-                </button>
               </div>
             </div>
 
-            {/* Row 3: Brush size slider */}
-            <div className="flex items-center gap-4 bg-slate-50/30 p-3 rounded-2xl w-full">
+            {/* Row 4: Brush size slider */}
+            <div className="flex items-center gap-3 bg-slate-50/30 p-3 rounded-2xl w-full">
               <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
-                <div style={{ width: Math.max(2, brushSize / 2), height: Math.max(2, brushSize / 2), backgroundColor: currentColor, borderRadius: '50%' }} className="transition-all" />
+                <div
+                  style={{
+                    width: Math.max(3, brushSize / 2),
+                    height: Math.max(3, brushSize / 2),
+                    backgroundColor: currentColor,
+                    borderRadius: '50%',
+                  }}
+                  className="transition-all"
+                />
               </div>
-              <input type="range" min="1" max="50" value={brushSize}
+              <input
+                type="range"
+                min="1"
+                max="50"
+                value={brushSize}
                 onChange={e => setBrushSize(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-pink-400" />
-              <span className="text-[10px] font-bold text-slate-400 w-8 flex-shrink-0">{brushSize}px</span>
+                className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer"
+                style={{
+                  background: `linear-gradient(to right, #f472b6 0%, #f472b6 ${((brushSize - 1) / 49) * 100}%, #e2e8f0 ${((brushSize - 1) / 49) * 100}%, #e2e8f0 100%)`,
+                }}
+              />
+              <span className="text-[10px] font-bold text-slate-400 w-8 flex-shrink-0 text-right">
+                {brushSize}px
+              </span>
             </div>
           </div>
         </div>
       </div>
 
-      <style dangerouslySetInnerHTML={{ __html: `
-        .shadow-xl-soft { box-shadow: 0 20px 60px -15px rgba(0,0,0,0.05); }
-        .shadow-toolbar  { box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08); }
+      {/* Slider thumb styling — minimal inline style to replace dangerouslySetInnerHTML */}
+      <style>{`
         input[type=range]::-webkit-slider-thumb {
-          -webkit-appearance:none; height:18px; width:18px; border-radius:50%;
-          background:#f472b6; box-shadow:0 2px 10px rgba(244,114,182,.4);
-          cursor:pointer; border:3px solid white; transition:all .2s;
+          -webkit-appearance: none;
+          height: 18px;
+          width: 18px;
+          border-radius: 50%;
+          background: #f472b6;
+          box-shadow: 0 2px 10px rgba(244,114,182,.4);
+          cursor: pointer;
+          border: 3px solid white;
+          transition: all .2s;
         }
-        input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
-      `}} />
+        input[type=range]::-webkit-slider-thumb:hover {
+          transform: scale(1.2);
+        }
+        input[type=range]::-moz-range-thumb {
+          height: 12px;
+          width: 12px;
+          border-radius: 50%;
+          background: #f472b6;
+          box-shadow: 0 2px 10px rgba(244,114,182,.4);
+          cursor: pointer;
+          border: 3px solid white;
+        }
+      `}</style>
     </div>
   );
 });

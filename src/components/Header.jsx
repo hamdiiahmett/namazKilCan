@@ -1,33 +1,45 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo } from 'react';
 import zenepPhoto from "../assets/zenepcan.jpeg";
 import ametPhoto from "../assets/ametcan.jpeg";
 
 const users = [
-  { id: 'zenep', name: 'Zenepcan', avatar: zenepPhoto },
-  { id: 'amet', name: 'Ametcan', avatar: ametPhoto }
+  { id: 'zenep', name: 'Zenepcan', avatar: zenepPhoto, emoji: '🌷' },
+  { id: 'amet', name: 'Ametcan', avatar: ametPhoto, emoji: '🌿' }
 ];
 
 // Profil avatarı — sadece aktiflik değişince re-render
 const UserAvatar = memo(({ user, isActive, onClick }) => (
   <div
     onClick={onClick}
-    className={`flex flex-col sm:flex-row items-center gap-1 sm:gap-2 group cursor-pointer transition-transform duration-300 ${isActive ? 'scale-105 sm:scale-110' : 'opacity-70 hover:opacity-100'}`}
+    className={`flex flex-col items-center gap-1.5 group cursor-pointer transition-all duration-500 ${
+      isActive ? 'scale-105' : 'opacity-60 hover:opacity-90'
+    }`}
   >
-    <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full border-[3px] shadow-sm overflow-hidden bg-white transition-colors duration-300
-      ${isActive ? 'border-pink-400 shadow-pink-200' : 'border-white group-hover:border-pink-200'}`}>
-      <img
-        src={user.avatar}
-        alt={user.name}
-        loading="eager"
-        decoding="async"
-        width={64}
-        height={64}
-        className="w-full h-full object-cover"
-      />
+    <div className="relative">
+      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden transition-all duration-500 ${
+        isActive 
+          ? 'ring-[3px] ring-pink-400 ring-offset-2 ring-offset-white shadow-lg shadow-pink-200/50' 
+          : 'ring-2 ring-white/80 group-hover:ring-pink-200'
+      }`}>
+        <img
+          src={user.avatar}
+          alt={user.name}
+          loading="eager"
+          decoding="async"
+          width={64}
+          height={64}
+          className="w-full h-full object-cover"
+        />
+      </div>
     </div>
-    <span className={`text-[11px] sm:text-sm font-bold px-3 py-0.5 sm:py-1 rounded-full sm:shadow-sm transition-colors
-      ${isActive ? 'text-pink-600 bg-pink-100 sm:bg-pink-100' : 'text-slate-500 bg-slate-100 sm:bg-white/70'}`}>
-      {user.name}
+
+    {/* Name Badge */}
+    <span className={`text-[11px] sm:text-xs font-bold px-3 py-0.5 rounded-full transition-all duration-300 ${
+      isActive 
+        ? 'text-pink-600 bg-pink-100/80 shadow-sm' 
+        : 'text-slate-500 bg-white/50 group-hover:bg-pink-50/50'
+    }`}>
+      {user.emoji} {user.name}
     </span>
   </div>
 ));
@@ -35,17 +47,32 @@ UserAvatar.displayName = 'UserAvatar';
 
 const Header = memo(({ currentUser, setCurrentUser }) => {
   return (
-    <header className="pt-4 pb-3 sm:pt-6 sm:pb-5 px-4 bg-white/80 backdrop-blur-md sticky top-0 z-50 shadow-sm shadow-pink-100/50 border-b border-pink-100 rounded-b-3xl sm:rounded-b-[2.5rem]">
+    <header className="pt-4 pb-3 sm:pt-5 sm:pb-4 px-4 glass-strong border-b border-pink-100/50 shadow-[0_4px_20px_rgba(236,72,153,0.06)]"
+      style={{ borderRadius: '0 0 1.5rem 1.5rem' }}
+    >
       <div className="max-w-xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0">
+        {/* Logo & Subtitle */}
         <div className="flex flex-col items-center sm:items-start w-full sm:w-auto">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-sky-400 drop-shadow-sm text-center sm:text-left">
-            CANCAN 🌸
-          </h1>
-          <p className="text-[11px] sm:text-sm font-medium text-slate-400 animate-pulse mt-1">
-            Cihazınızı seçmek için profilinize dokunun :o
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight"
+              style={{
+                background: 'linear-gradient(135deg, #ec4899 0%, #f472b6 30%, #38bdf8 70%, #0ea5e9 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}
+            >
+              CANCAN
+            </h1>
+            <span className="text-xl animate-bounce-in" style={{ animationDelay: '0.3s' }}>🌸</span>
+          </div>
+          <p className="text-[10px] sm:text-xs font-medium text-slate-400 mt-0.5 flex items-center gap-1">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            Profilinize dokunarak giriş yapın
           </p>
         </div>
 
+        {/* User Avatars */}
         <div className="flex gap-6 sm:gap-8 items-center justify-center">
           {users.map(user => (
             <UserAvatar

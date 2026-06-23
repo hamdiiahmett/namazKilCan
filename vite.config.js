@@ -8,12 +8,40 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,jpeg,woff2}'],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/api\.aladhan\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'prayer-times-cache',
+              expiration: { maxEntries: 10, maxAgeSeconds: 86400 },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'google-fonts-stylesheets',
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts',
+              expiration: { maxEntries: 10, maxAgeSeconds: 31536000 },
+            },
+          },
+        ],
+      },
       manifest: {
-        name: 'CANCAN',
+        name: 'CANCAN 🌸',
         short_name: 'CANCAN',
-        description: 'Zenebimle uygulamamiz.',
-        theme_color: '#fdf4ff',
-        background_color: '#fdf4ff',
+        description: 'Ametcan & Zenepcan — namaz takip, sohbet ve çizim.',
+        theme_color: '#fdf2f8',
+        background_color: '#fdf2f8',
         display: 'standalone',
         icons: [
           {
@@ -25,5 +53,11 @@ export default defineConfig({
         ]
       }
     })
-  ]
+  ],
+  build: {
+    target: 'es2020',
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'firebase/app', 'firebase/database', 'date-fns', 'lucide-react'],
+  },
 });

@@ -2,36 +2,50 @@ import React, { useEffect, useState, useCallback, memo, useMemo } from 'react';
 import { rtdb } from '../firebase';
 import { ref, onValue, set } from 'firebase/database';
 import { format } from 'date-fns';
-import { Check } from 'lucide-react';
+import { Check, Sun, Sunrise, Cloud, Sunset, Moon } from 'lucide-react';
 
 const PRAYERS = [
-  { id: 'Fajr', label: 'Sabah' },
-  { id: 'Dhuhr', label: 'Öğle' },
-  { id: 'Asr', label: 'İkindi' },
-  { id: 'Maghrib', label: 'Akşam' },
-  { id: 'Isha', label: 'Yatsı' }
+  { id: 'Fajr', label: 'Sabah', Icon: Sunrise, gradient: 'from-amber-400 to-orange-400', lightBg: 'bg-amber-50', iconColor: 'text-amber-500' },
+  { id: 'Dhuhr', label: 'Öğle', Icon: Sun, gradient: 'from-yellow-400 to-amber-400', lightBg: 'bg-yellow-50', iconColor: 'text-yellow-500' },
+  { id: 'Asr', label: 'İkindi', Icon: Cloud, gradient: 'from-sky-400 to-blue-400', lightBg: 'bg-sky-50', iconColor: 'text-sky-500' },
+  { id: 'Maghrib', label: 'Akşam', Icon: Sunset, gradient: 'from-rose-400 to-pink-400', lightBg: 'bg-rose-50', iconColor: 'text-rose-500' },
+  { id: 'Isha', label: 'Yatsı', Icon: Moon, gradient: 'from-indigo-400 to-purple-400', lightBg: 'bg-indigo-50', iconColor: 'text-indigo-500' }
 ];
 
 const users = [
-  { id: 'zenep', name: 'Zenepcan', city: 'Balikesir' },
-  { id: 'amet', name: 'Ametcan', city: 'Ankara' }
+  { id: 'zenep', name: 'Zenepcan', city: 'Balikesir', emoji: '🌷', gradient: 'from-pink-400 to-rose-400', lightBg: 'from-pink-50/50 to-rose-50/30', borderColor: 'border-pink-100' },
+  { id: 'amet', name: 'Ametcan', city: 'Ankara', emoji: '🌿', gradient: 'from-sky-400 to-blue-400', lightBg: 'from-sky-50/50 to-blue-50/30', borderColor: 'border-sky-100' }
 ];
 
 // Namaz kartı — sadece kendi verisi değişince re-render olur
 const PrayerCard = memo(({ prayer, isDone, timeStr, onToggle }) => (
-  <div className="flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-slate-50 transition-colors hover:border-pink-200">
-    <div className="flex flex-col">
-      <span className="font-medium text-slate-700">{prayer.label}</span>
-      <span className="text-xs text-slate-400 font-mono">{timeStr}</span>
+  <div className={`flex items-center justify-between p-3.5 rounded-2xl transition-all duration-300 border ${
+    isDone 
+      ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-100 shadow-sm shadow-green-100/50' 
+      : 'bg-white/80 border-slate-100/80 hover:border-pink-100'
+  }`}>
+    <div className="flex items-center gap-3">
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300 ${
+        isDone ? 'bg-green-100' : prayer.lightBg
+      }`}>
+        <prayer.Icon size={18} className={isDone ? 'text-green-500' : prayer.iconColor} strokeWidth={2} />
+      </div>
+      <div className="flex flex-col">
+        <span className={`font-semibold text-sm transition-colors ${isDone ? 'text-green-600' : 'text-slate-700'}`}>
+          {prayer.label}
+        </span>
+        <span className="text-[11px] text-slate-400 font-mono tracking-wider">{timeStr}</span>
+      </div>
     </div>
     <button
       onClick={onToggle}
-      className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 shadow-inner 
-        ${isDone 
-          ? 'bg-gradient-to-tr from-green-400 to-emerald-300 shadow-green-200 text-white scale-110' 
-          : 'bg-slate-100 hover:bg-slate-200 text-transparent border border-slate-200'}`}
+      className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90 ${
+        isDone
+          ? 'bg-gradient-to-tr from-green-400 to-emerald-400 shadow-md shadow-green-200/50 text-white scale-110'
+          : 'bg-slate-100 hover:bg-pink-100 text-transparent border border-slate-200 hover:border-pink-200'
+      }`}
     >
-      <Check size={18} strokeWidth={3} />
+      <Check size={16} strokeWidth={3} className={isDone ? 'text-white' : ''} />
     </button>
   </div>
 ));
@@ -44,10 +58,35 @@ const UserPanel = memo(({ user, timings, prayerState, todayStr }) => {
     set(ref(rtdb, `prayers/${todayStr}/${user.id}/${prayerId}`), !currentVal);
   }, [prayerState, todayStr, user.id]);
 
+  const completedCount = useMemo(() => {
+    return PRAYERS.filter(p => prayerState?.[p.id]).length;
+  }, [prayerState]);
+
   return (
-    <div className="flex-1 bg-gradient-to-br from-white to-pink-50/50 p-4 rounded-2xl border border-pink-100 shadow-sm">
-      <h3 className="font-semibold text-pink-500 mb-4 text-center text-lg">{user.name} ({user.city})</h3>
-      <div className="space-y-3">
+    <div className={`flex-1 bg-gradient-to-br ${user.lightBg} p-4 rounded-2xl border ${user.borderColor} shadow-sm transition-all`}>
+      {/* User header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">{user.emoji}</span>
+          <div>
+            <h3 className="font-bold text-slate-700 text-sm">{user.name}</h3>
+            <span className="text-[10px] text-slate-400 font-medium">{user.city}</span>
+          </div>
+        </div>
+        {/* Progress */}
+        <div className="flex items-center gap-1.5">
+          <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full bg-gradient-to-r ${user.gradient} transition-all duration-500`}
+              style={{ width: `${(completedCount / 5) * 100}%` }}
+            />
+          </div>
+          <span className="text-[10px] font-bold text-slate-400">{completedCount}/5</span>
+        </div>
+      </div>
+
+      {/* Prayer cards */}
+      <div className="space-y-2">
         {PRAYERS.map(p => (
           <PrayerCard
             key={p.id}
@@ -120,13 +159,27 @@ export default function PrayerTracker() {
     return () => unsubscribe();
   }, [todayStr]);
 
-  if (loading) return <div className="text-center p-6 text-pink-300 animate-pulse font-medium">Vakitler yükleniyor... ⏳</div>;
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 gap-3 animate-pulse">
+        <Moon size={32} className="text-pink-300" />
+        <span className="text-sm font-medium text-pink-300">Vakitler yükleniyor...</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-white/80 backdrop-blur-sm p-6 rounded-[2rem] shadow-sm border border-orange-100/50">
-      <h2 className="text-xl font-bold text-slate-700 mb-6 text-center">Bugünün Namazları 🕋</h2>
-      
-      <div className="flex flex-col sm:flex-row gap-6 justify-between">
+    <div className="glass p-5 rounded-[2rem] shadow-sm border border-pink-100/50 mx-2 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-center gap-2 mb-5">
+        <span className="text-xl">🕋</span>
+        <h2 className="text-lg font-bold text-slate-700">Bugünün Namazları</h2>
+        <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+          {format(new Date(), 'dd MMM')}
+        </span>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-4 justify-between">
         {users.map(u => (
           <UserPanel
             key={u.id}
